@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "agent_zena": "src.zena_agent:graph"
+  },
+  "env": ".env",
+  "image_distro": "wolfi"
+}
