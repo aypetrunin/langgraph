@@ -1,3 +1,9 @@
+deactivate
+cd /home/copilot_superuser/petrunin/zena/langgraph
+source .venv/bin/activate
+python -c "import sys; print(sys.executable)"
+
+
 # 1.Фиксация версии Python для проекта
 # переходим в рабочий каталог и выполняем команду
 uv python pin 3.11
@@ -44,6 +50,10 @@ langgraph build -c langgraph.json -t zena-agent:latest
 # Запуск 
 langgraph up -c langgraph.json --no-pull
 
-# 9ю Создаем docker-compose -> правим порты для postgres -> Запускаем через  docker compose up
+# 9. Создаем docker-compose -> правим порты для postgres -> Запускаем через  docker compose up
 docker compose down
 docker compose up -d
+
+# 10. Просмотр логов в живую
+docker logs -f langgraph_api
+docker logs --tail 100 langgraph_api

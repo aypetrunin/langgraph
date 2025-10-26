@@ -38,6 +38,7 @@ services:
       - zena-network
 
   langgraph-api:
+    container_name: langgraph_api
     ports:
       - "8123:8000"
     depends_on:
