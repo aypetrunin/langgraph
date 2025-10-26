@@ -139,15 +139,16 @@ async def mcp_tools(state: State) -> State:
         t0 = time.perf_counter()
 
         mcp_port = state['data'].get('mcp_port')
+        print(mcp_port)
 
         client = MultiServerMCPClient({
             "company": {
                 "transport": "sse",
-                "url": f"http://localhost:{mcp_port}/sse"
+                "url": f"http://172.17.0.1:{mcp_port}/sse"
             }
         })
         all_tools = await client.get_tools()
-
+        print(all_tools)
         # Базовые инструменты (доступны всегда)
         allowed_tool_names = [
             "zena_faq",

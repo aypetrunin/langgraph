@@ -34,3 +34,16 @@ uv add --dev pytest
 
 # 8. Посмотреть дерево пакетов
 uv tree
+
+# Создание докера
+langgraph dockerfile --add-docker-compose -c langgraph.json Dockerfile
+
+# Создание образа
+langgraph build -c langgraph.json -t zena-agent:latest
+
+# Запуск 
+langgraph up -c langgraph.json --no-pull
+
+# 9ю Создаем docker-compose -> правим порты для postgres -> Запускаем через  docker compose up
+docker compose down
+docker compose up -d
