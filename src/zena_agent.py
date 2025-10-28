@@ -1,22 +1,18 @@
-import asyncio
+"""Модуль описвающий граф агента."""
+
 from langgraph.graph import END, START, StateGraph
-from langchain_core.messages import HumanMessage, AIMessage
 
-
-from .zena_common import logger
-from .zena_state import State, InputState, OutputState, Context
 from .zena_agent_node import (
-    data_collection,
-    builder_prompt,
-    mcp_tools,
     agent,
-    tools_node,
-    should_continue,
-    verification_message,
+    builder_prompt,
     count_tokens,
-    # sent_messages_to_http,
+    data_collection,
+    mcp_tools,
+    should_continue,
+    tools_node,
+    verification_message,
 )
-
+from .zena_state import Context, InputState, OutputState, State
 
 workflow = StateGraph(
     state_schema=State,
@@ -39,9 +35,7 @@ workflow.add_edge("data_collection", "builder_prompt")
 workflow.add_edge("builder_prompt", "mcp_tools")
 workflow.add_edge("mcp_tools", "agent")
 workflow.add_conditional_edges(
-    "agent",
-    should_continue,
-    {"tools": "tools", "end": "count_tokens"}
+    "agent", should_continue, {"tools": "tools", "end": "count_tokens"}
 )
 workflow.add_edge("tools", "agent")
 workflow.add_edge("count_tokens", END)

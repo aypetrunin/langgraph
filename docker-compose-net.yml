@@ -4,6 +4,7 @@ volumes:
 
 services:
   langgraph-redis:
+    container_name: zena_langgraph-redis
     image: redis:6
     healthcheck:
       test: redis-cli ping
@@ -14,6 +15,7 @@ services:
       - zena-network
 
   langgraph-postgres:
+    container_name: zena_langgraph-postgres
     image: pgvector/pgvector:pg16
     ports:
       - "5443:5432"
@@ -38,7 +40,8 @@ services:
       - zena-network
 
   langgraph-api:
-    container_name: langgraph_api
+    container_name: zena_langgraph_api
+    image: zena_langgraph_api:latest
     ports:
       - "8123:8000"
     depends_on:

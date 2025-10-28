@@ -46,3 +46,34 @@ dev = [
     "pytest-asyncio>=1.2.0",
     "langgraph-cli[inmem]>=0.2.8",
 ]
+
+[tool.uv]
+# всегда подтягивать dev-зависимости
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 88
+
+lint.select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "D",    # pydocstyle
+    "D401", # первая строка docstring — повелительное наклонение
+    "T201", # принты
+    "UP",   # pyupgrade
+]
+
+lint.ignore = [
+    "UP006",
+    "UP007",
+    "UP035", # разрешено import из typing_extensions
+    "D417",  # не требуем полных docstring для всех аргументов
+    "E501",  # не проверяем длину строки
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "UP"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

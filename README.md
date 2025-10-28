@@ -3,6 +3,9 @@ cd /home/copilot_superuser/petrunin/zena/langgraph
 source .venv/bin/activate
 python -c "import sys; print(sys.executable)"
 
+# Путь к интерпритатору.
+/home/copilot_superuser/petrunin/zena/langgraph/.venv/bin/python
+
 
 # 1.Фиксация версии Python для проекта
 # переходим в рабочий каталог и выполняем команду

@@ -1,14 +1,15 @@
+"""Модуль реализует функции обращения к Postgres."""
 
-import asyncpg
 import json
 import os
 from datetime import datetime
-from typing_extensions import Dict, Any, Optional, List
+
+import asyncpg
 from dotenv import load_dotenv
+from typing_extensions import Any, Dict, List
 
 from .zena_common import logger, retry_async
 from .zena_requests import fetch_personal_info
-
 
 load_dotenv()
 
@@ -22,6 +23,7 @@ POSTGRES_CONFIG = {
 
 
 def flatten_dict_no_prefix(d: dict) -> dict:
+    """Функция получения плоского словаря."""
     items = {}
     for key, value in d.items():
         if isinstance(value, dict):
@@ -32,7 +34,7 @@ def flatten_dict_no_prefix(d: dict) -> dict:
 
 
 async def data_collection_postgres(user_companychat: int) -> Dict:
-
+    """Функция получения всех данных из Postgres."""
     conn = await asyncpg.connect(**POSTGRES_CONFIG)
     try:
         # 1) Канальный контекст
@@ -67,7 +69,7 @@ async def data_collection_postgres(user_companychat: int) -> Dict:
             "product_id": product_id,
             "user_info": user_info,
             "dialog": dialog,
-            "query": query
+            "query": query,
         }
         flat_data = flatten_dict_no_prefix(data)
         return {"data": flat_data}
@@ -77,6 +79,7 @@ async def data_collection_postgres(user_companychat: int) -> Dict:
 
 @retry_async()
 async def fetch_dialog(conn: asyncpg.Connection, user_companychat: int) -> Any:
+    """Получение диалога."""
     rows = await conn.fetch(
         """
         SELECT
@@ -92,15 +95,18 @@ async def fetch_dialog(conn: asyncpg.Connection, user_companychat: int) -> Any:
     if not rows:
         return "", ""
 
-    messages = [record['message'] for record in rows[:-1]]
+    messages = [record["message"] for record in rows[:-1]]
     joined_messages = "\n".join(messages)
-    query = rows[-1]['message']
+    query = rows[-1]["message"]
     return joined_messages, query
 
 
 @retry_async()
-async def fetch_channel_info(conn: asyncpg.Connection, user_companychat: int) -> Dict[str, Any]:
-    row: Optional[asyncpg.Record] = await conn.fetchrow(
+async def fetch_channel_info(
+    conn: asyncpg.Connection, user_companychat: int
+) -> Dict[str, Any]:
+    """Получение информации о компании."""
+    row: asyncpg.Record | None = await conn.fetchrow(
         """
         SELECT
             cc.mcp_port AS mcp_port,
@@ -122,9 +128,11 @@ async def fetch_channel_info(conn: asyncpg.Connection, user_companychat: int) ->
 
 
 @retry_async()
-async def fetch_prompts(conn: asyncpg.Connection, user_companychat: int) -> Dict[str, Any]:
-
-    row: Optional[asyncpg.Record] = await conn.fetchrow(
+async def fetch_prompts(
+    conn: asyncpg.Connection, user_companychat: int
+) -> Dict[str, Any]:
+    """Получение промта."""
+    row: asyncpg.Record | None = await conn.fetchrow(
         """
         SELECT
         (
@@ -156,7 +164,7 @@ async def fetch_prompts(conn: asyncpg.Connection, user_companychat: int) -> Dict
         """,
         user_companychat,
     )
-    
+
     if not row:
         return {}
 
@@ -172,6 +180,7 @@ async def fetch_prompts(conn: asyncpg.Connection, user_companychat: int) -> Dict
 
 @retry_async()
 async def fetch_category(conn: asyncpg.Connection, channel_id: int) -> str:
+    """Получение категорий/групп товаров/услуг."""
     rows: List[asyncpg.Record] = await conn.fetch(
         """
         SELECT DISTINCT
@@ -182,13 +191,16 @@ async def fetch_category(conn: asyncpg.Connection, channel_id: int) -> str:
         """,
         channel_id,  # без кортежа
     )
-    list_category: List[str] = [f" - {row['product_unid_ean']}" for row in rows] if rows else []
-    string_category = ', \n'.join(list_category)
+    list_category: List[str] = (
+        [f" - {row['product_unid_ean']}" for row in rows] if rows else []
+    )
+    string_category = ", \n".join(list_category)
     return string_category
 
 
 @retry_async()
 async def fetch_probny(conn: asyncpg.Connection, channel_id: int) -> str:
+    """Получение пробных услуг."""
     rows: List[asyncpg.Record] = await conn.fetch(
         """
         SELECT
@@ -212,15 +224,22 @@ async def fetch_probny(conn: asyncpg.Connection, channel_id: int) -> str:
         duration = (r["duration"] or "").strip()
         price_min = r["price_min"]
         # Можно показать диапазон, если он есть
-        price_part = f"{price_min}" if r["price_max"] in (None, price_min) else f"{price_min}–{r['price_max']}"
-        piece = f"Название: {name}. Продолжительность: {duration}. Стоимость: {price_part}"
+        price_part = (
+            f"{price_min}"
+            if r["price_max"] in (None, price_min)
+            else f"{price_min}–{r['price_max']}"
+        )
+        piece = (
+            f"Название: {name}. Продолжительность: {duration}. Стоимость: {price_part}"
+        )
         parts.append(piece)
     return ", ".join(parts)
 
 
 @retry_async()
 async def fetch_dialog_state(conn: asyncpg.Connection, session_id: int) -> str:
-    row: Optional[asyncpg.Record] = await conn.fetchrow(
+    """Получение состояние диалога."""
+    row: asyncpg.Record | None = await conn.fetchrow(
         """
         SELECT ds.name AS status
         FROM dialog_state ds
@@ -239,8 +258,11 @@ async def fetch_dialog_state(conn: asyncpg.Connection, session_id: int) -> str:
 
 
 @retry_async()
-async def fetch_product_list(conn: asyncpg.Connection, session_id: int) -> Dict[str, Any]:
-    row: Optional[asyncpg.Record] = await conn.fetchrow(
+async def fetch_product_list(
+    conn: asyncpg.Connection, session_id: int
+) -> dict[str, Any]:
+    """Получение списка услуг товаров в последнем поиске."""
+    row: asyncpg.Record | None = await conn.fetchrow(
         """
         SELECT
             ds.id,
@@ -266,7 +288,7 @@ async def fetch_product_list(conn: asyncpg.Connection, session_id: int) -> Dict[
             q = q[1:-1]
         query_search = q
 
-    products: List[Dict[str, Any]] = []
+    products: list[dict[str, Any]] = []
     raw_list = row["product_list"]
     if raw_list is not None:
         raw = str(raw_list).strip()
@@ -288,7 +310,9 @@ async def fetch_product_list(conn: asyncpg.Connection, session_id: int) -> Dict[
         [
             f"product_id: {p['product_id']}. Название: '{p['product_name']}'. Стоимость: {p['price']}"
             for p in products
-            if p.get("product_id") is not None and p.get("product_name") and p.get("price") is not None
+            if p.get("product_id") is not None
+            and p.get("product_name")
+            and p.get("price") is not None
         ]
     )
 
@@ -299,8 +323,9 @@ async def fetch_product_list(conn: asyncpg.Connection, session_id: int) -> Dict[
 
 
 @retry_async()
-async def fetch_product_id(conn: asyncpg.Connection, session_id: int) -> Dict[str, Any]:
-    row: Optional[asyncpg.Record] = await conn.fetchrow(
+async def fetch_product_id(conn: asyncpg.Connection, session_id: int) -> dict[str, Any]:
+    """Получение id и названия выбранного клиентов товара/услуги."""
+    row: asyncpg.Record | None = await conn.fetchrow(
         """
         SELECT
             ds.id,
@@ -318,7 +343,8 @@ async def fetch_product_id(conn: asyncpg.Connection, session_id: int) -> Dict[st
         return {"product_id": None, "product_name": None}
 
     # ::text может вернуть строку в кавычках, аккуратно снимаем их
-    def normalize_text(val: Optional[str]) -> Optional[str]:
+    def normalize_text(val: str | None) -> str | None:
+        """Нормальзация текста."""
         if val is None:
             return None
         s = str(val).strip()
@@ -334,21 +360,28 @@ async def fetch_product_id(conn: asyncpg.Connection, session_id: int) -> Dict[st
 
 @retry_async()
 async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
+    """Удаление истории диалога. Используется для тестирования."""
     conn = await asyncpg.connect(**POSTGRES_CONFIG)
     try:
         channel_info = await fetch_channel_info(conn, user_companychat)
         session_id = channel_info.get("session_id")
         if not session_id:
-            logger.error(f"Session ID not found for user_companychat={user_companychat}")
+            logger.error(
+                f"Session ID not found for user_companychat={user_companychat}"
+            )
             return {"success": False, "error": "session_id not found"}
 
         success = False
         try:
             async with conn.transaction():
-                await conn.execute("DELETE FROM dialog_state WHERE session_id = $1", session_id)
-                await conn.execute("DELETE FROM agent_chat_histories WHERE session_id = $1", session_id)
                 await conn.execute(
-                                    """
+                    "DELETE FROM dialog_state WHERE session_id = $1", session_id
+                )
+                await conn.execute(
+                    "DELETE FROM agent_chat_histories WHERE session_id = $1", session_id
+                )
+                await conn.execute(
+                    """
                                     DELETE FROM bot_history
                                     WHERE user_companychat = $1
                                     AND id < (
@@ -357,7 +390,7 @@ async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
                                         WHERE user_companychat = $1
                                     );
                                     """,
-                    user_companychat
+                    user_companychat,
                 )
             success = True
         except Exception as e:

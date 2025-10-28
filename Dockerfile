@@ -15,6 +15,7 @@ RUN for dep in /deps/*; do \
 
 # ========== ENV-переменные для Langserve =============
 ENV LANGSERVE_GRAPHS='{"agent_zena": "src.zena_agent:graph"}'
+ENV IS_DOCKER=1
 
 # ========== Проверить/обновить служебные модули =======
 RUN mkdir -p /api/langgraph_api /api/langgraph_runtime /api/langgraph_license && \

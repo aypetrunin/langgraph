@@ -1,13 +1,17 @@
+"""Модуль описывающий состояние графа."""
+
 from __future__ import annotations
 
-from typing_extensions import TypedDict, List
-from typing_extensions import Annotated
+from operator import add
+
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
-from operator import add
+from typing_extensions import Annotated, List, TypedDict
 
 
 class Context(TypedDict):
+    """Переменные контекста выполнения."""
+
     _user_companychat: int
     _reply_to_history_id: int
     _access_token: str
@@ -15,10 +19,14 @@ class Context(TypedDict):
 
 
 class InputState(TypedDict, total=True):
+    """Входная переменная."""
+
     messages: Annotated[List[AnyMessage], add_messages]
 
 
 class OutputState(TypedDict, total=False):
+    """Выходные переменные."""
+
     messages: Annotated[List[AnyMessage], add_messages]
     time_node: Annotated[List[dict], add]
     time_all: Annotated[float, add]
@@ -34,10 +42,14 @@ class OutputState(TypedDict, total=False):
 
 
 class PrivateState(TypedDict, total=False):
+    """Приватные переменные."""
+
     data: dict
-    tools: list 
+    tools: list
     user_companychat: int
 
 
 class State(InputState, OutputState, PrivateState, total=False):  # type: ignore[misc]
+    """Состояние графа."""
+
     pass
