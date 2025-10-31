@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from operator import add
+from typing import Any
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
@@ -28,12 +29,12 @@ class OutputState(TypedDict, total=False):
     """Выходные переменные."""
 
     messages: Annotated[List[AnyMessage], add_messages]
-    time_node: Annotated[List[dict], add]
+    time_node: Annotated[List[dict[str, Any]], add]
     time_all: Annotated[float, add]
-    tokens: dict
+    tokens: dict[str, Any]
     tools_name: Annotated[List[str], add]
-    tools_args: Annotated[List[dict], add]
-    tools_results: Annotated[List[dict], add]
+    tools_args: Annotated[List[dict[str, Any]], add]
+    tools_results: Annotated[List[dict[str, Any]], add]
     prompt_system: str
     template_prompt_system: str
     dialog_state: str
@@ -44,8 +45,8 @@ class OutputState(TypedDict, total=False):
 class PrivateState(TypedDict, total=False):
     """Приватные переменные."""
 
-    data: dict
-    tools: list
+    data: dict[str, Any]
+    tools: list[str]
     user_companychat: int
 
 

@@ -1,12 +1,14 @@
 """Модуль реализует обращение по API."""
 
+from typing import Any
+
 import aiohttp
 
 from .zena_common import logger, retry_async
 
 
 @retry_async()
-async def fetch_personal_info(user_id: int) -> dict:
+async def fetch_personal_info(user_id: int) -> dict[str, Any]:
     """Получение персональной информации через API."""
     url = f"https://httpservice.ai2b.pro/v1/vk/personal-data/{user_id}"
     timeout = aiohttp.ClientTimeout(total=10)
@@ -25,7 +27,7 @@ async def sent_message_to_history(
     user_companychat: int,
     reply_to_history_id: int,
     access_token: str,
-) -> dict:
+) -> dict[str, Any]:
     """Отправка данных по API для записи в Postgres."""
     url = "https://httpservice.ai2b.pro/v1/telegram/n8n/outgoing"
     payload = {
@@ -50,7 +52,7 @@ async def sent_message_to_history(
     except aiohttp.ClientResponseError as e:
         logger.warning(f"HTTP error: {e.status} {e.message}")
         raise
-    except aiohttp.ClientTimeout:
+    except (aiohttp.ConnectionTimeoutError, aiohttp.ServerTimeoutError):
         logger.warning("Request timed out")
         raise
     except aiohttp.ClientError as e:

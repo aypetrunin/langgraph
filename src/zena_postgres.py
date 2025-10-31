@@ -22,7 +22,7 @@ POSTGRES_CONFIG = {
 }
 
 
-def flatten_dict_no_prefix(d: dict) -> dict:
+def flatten_dict_no_prefix(d: dict[str, Any]) -> dict[str, Any]:
     """Функция получения плоского словаря."""
     items = {}
     for key, value in d.items():
@@ -33,7 +33,7 @@ def flatten_dict_no_prefix(d: dict) -> dict:
     return items
 
 
-async def data_collection_postgres(user_companychat: int) -> Dict:
+async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
     """Функция получения всех данных из Postgres."""
     conn = await asyncpg.connect(**POSTGRES_CONFIG)
     try:

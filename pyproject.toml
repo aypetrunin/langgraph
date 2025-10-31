@@ -36,6 +36,7 @@ dependencies = [
     "aiofiles>=25.1.0",
     "langchain>=1.0.2",
     "langchain-mcp-adapters>=0.1.11",
+    "types-aiofiles>=25.1.0.20251011",
 ]
 
 [dependency-groups]
@@ -77,3 +78,22 @@ lint.ignore = [
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+
+[tool.mypy]
+plugins = ["pydantic.mypy"] # Включает плагин Pydantic для корректной типизации моделей и автогенерации сигнатур конструкторов
+
+ignore_missing_imports = true # глобально игнорирует отсутствие type stubs для сторонних библиотек,
+
+follow_imports = "silent" # Не выводить предупреждения о типах в импортируемых модулях (ускоряет проверку и уменьшает шум)
+warn_redundant_casts = true # Предупреждать о ненужных операциях приведения типа (например, cast, которые не влияют на вывод типов)
+warn_unused_ignores = true # Предупреждать, если используется # type: ignore, которые фактически не нужны (чистота кода)
+disallow_any_generics = true # Запретить обобщенные типы с неявным any (например, List без указания типа элементов)
+check_untyped_defs = true # Проверять функции без аннотаций типов (строже, помогает найти ошибки в неаннотированном коде)
+no_implicit_reexport = true # Не экспортировать типы импорты из __init__.py автоматически (контролирует импортируемые типы)
+disallow_untyped_defs = true # Требовать аннотаций типов у всех функций и методов (повышает строгость проверки)
+
+[tool.pydantic-mypy]
+init_forbid_extra = true # Запретить передачу в конструктор моделей Pydantic полей, не описанных явно в модели
+init_typed = true # Генерировать типизированные сигнатуры __init__ на основе типов атрибутов модели (типизация конструктора)
+warn_required_dynamic_aliases = true # Предупреждать, если используются алиасы или динамические имена полей без явной типизации

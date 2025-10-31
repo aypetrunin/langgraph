@@ -6,7 +6,7 @@ import logging
 import random
 from functools import wraps
 
-from typing_extensions import Any, Awaitable, Callable, TypeVar, Union
+from typing_extensions import Any, Awaitable, Callable, TypeVar
 
 T = TypeVar("T")
 
@@ -26,7 +26,7 @@ def retry_async(
     backoff: float = 2.0,
     jitter: float = 1.0,
     exceptions: tuple[type[Exception], ...] = (Exception,),
-):
+) -> Any:
     """Декоратор для асинхронных ретраев с экспоненциальным бэкоффом и равномерным джиттером.
 
     Args:
@@ -80,10 +80,12 @@ def _func_name(depth: int = 0) -> str:
         if frame is None:
             return "<unknown>"
         frame = frame.f_back
+    if frame is None:
+        return "<unknown>"
     return frame.f_code.co_name
 
 
-def _content_to_text(content: Union[str, list, None]) -> str:
+def _content_to_text(content: str | list[Any] | None) -> str:
     """Функция получения сообщения.
 
     Функция возвращает content из HumanMessages в зависимости от того

@@ -1,20 +1,19 @@
 """Модуль реализует подсчет токенов."""
 
-import logging
+from types import ModuleType
 from typing import Any, Dict
 
-from langchain_core.messages import AIMessage
-
-logger = logging.getLogger(__name__)
+from langchain_core.messages import AIMessage, BaseMessage
 
 # --- Fallback для подсчёта токенов, если usage недоступен ---
+tiktoken: ModuleType | None
 try:
     import tiktoken
 except ImportError:
     tiktoken = None
 
 
-def _get_encoder(model_name: str = "gpt-4o-mini-2024-07-18"):
+def _get_encoder(model_name: str = "gpt-4o-mini-2024-07-18") -> Any | None:
     if tiktoken is None:
         return None
     try:
@@ -26,18 +25,18 @@ def _get_encoder(model_name: str = "gpt-4o-mini-2024-07-18"):
             return None
 
 
-def _count_tokens_text(text: str, enc) -> int:
+def _count_tokens_text(text: str, enc: Any) -> int:
     if not enc or not isinstance(text, str):
         return 0
     return len(enc.encode(text or ""))
 
 
-def _count_tokens_messages(messages: list, enc) -> int:
+def _count_tokens_messages(messages: list[BaseMessage], enc: Any) -> int:
     if not enc:
         return 0
     total = 0
     for m in messages:
-        c = m.get("content", "")
+        c = getattr(m, "content", "")
         if isinstance(c, str):
             total += _count_tokens_text(c, enc)
         elif isinstance(c, list):

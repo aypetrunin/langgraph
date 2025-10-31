@@ -9,7 +9,7 @@ import aiofiles
 import httpx
 from jinja2 import Template
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
@@ -48,7 +48,7 @@ async def verification_message(
         user_companychat = ctx.get("_user_companychat")
 
         messages = state["messages"]
-        last_msg_content: Union[str, list, None] = (
+        last_msg_content: Union[str, list[BaseMessage], None] = (
             messages[-1].content if messages else None
         )
         last_message = _content_to_text(last_msg_content).strip()
