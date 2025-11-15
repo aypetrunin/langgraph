@@ -9,7 +9,7 @@ RUN for dep in /deps/*; do \
       if [ -d "$dep" ]; then \
         echo "Installing $dep"; \
         cd "$dep" && \
-        PYTHONDONTWRITEBYTECODE=1 uv pip install --system --no-cache-dir -c /api/constraints.txt -e .; \
+        PYTHONDONTWRITEBYTECODE=1 uv pip install --system --no-cache-dir -e .; \
       fi; \
     done
 

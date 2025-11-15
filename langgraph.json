@@ -3,8 +3,13 @@
     "."
   ],
   "graphs": {
-    "agent_zena": "src.zena_agent:graph"
+    "agent_zena": "src.zena_agent:graph",
+    "deepagent": "src.deepagent:deepagent"
   },
   "env": ".env",
-  "image_distro": "wolfi"
+  "image_distro": "wolfi",
+  "checkpoint": {
+    "type": "postgres",
+    "connection_string": "postgres://postgres:postgres@langgraph-postgres:5432/postgres?sslmode=disable"
+  }
 }
