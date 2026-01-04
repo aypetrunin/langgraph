@@ -3,13 +3,14 @@
     "."
   ],
   "graphs": {
-    "agent_zena": "src.zena_agent:graph",
+    "agent_zena_5001": "src.zena_create_graph:graph_5001",
+    "agent_zena_5002": "src.zena_create_graph:graph_5002",
+    "agent_zena_5005": "src.zena_create_graph:graph_5005",
+    "agent_zena_5006": "src.zena_create_graph:graph_5006",
+    "agent_zena_5007": "src.zena_create_graph:graph_5007",
+    "agent_zena_5020": "src.zena_create_graph:graph_5020",
     "deepagent": "src.deepagent:deepagent"
   },
   "env": ".env",
-  "image_distro": "wolfi",
-  "checkpoint": {
-    "type": "postgres",
-    "connection_string": "postgres://postgres:postgres@langgraph-postgres:5432/postgres?sslmode=disable"
-  }
+  "image_distro": "wolfi"
 }

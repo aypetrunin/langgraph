@@ -23,7 +23,6 @@ from langchain.agents.middleware import (
 )
 
 
-
 from .zena_agent_node import (
     verification_message,
     data_collection,
@@ -31,7 +30,7 @@ from .zena_agent_node import (
 
 from dotenv import load_dotenv
 
-from .zena_state import Context, InputState, OutputState, State, CustomState
+from .zena_state import Context, InputState, OutputState, State
 
 
 load_dotenv()
@@ -50,9 +49,9 @@ model = init_chat_model(
 )
 
 class CustomMiddleware(AgentMiddleware):
-    state_schema = CustomState
+    state_schema = State
 
-    def before_model(self, state: CustomState, runtime) -> dict[str, Any] | None:
+    def before_model(self, state: State, runtime) -> dict[str, Any] | None:
         print("==before_model==")
         # print(state)
         return None
@@ -103,7 +102,7 @@ agent = create_agent(
         #     always_include=["search"],  # Always include certain tools
         # ),
         # Redact emails in user input
-        PIIMiddleware("email", strategy="block", apply_to_input=True),
+        # PIIMiddleware("email", strategy="block", apply_to_input=True),
     ]
 )
 

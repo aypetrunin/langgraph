@@ -49,12 +49,16 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
         # Здесь делаем последовательную выборку, а не gather на одном conn.
         # dialog = await fetch_dialog(conn, user_companychat)
         prompts_info = await fetch_prompts(conn, user_companychat)
-        dialog, query = await fetch_dialog(conn, user_companychat)
+        # dialog, query = await fetch_dialog(conn, user_companychat)
         category = await fetch_category(conn, channel_id)
+        products_full = await fetch_services(conn, channel_id)
         probny = await fetch_probny(conn, channel_id)
-        dialog_state = await fetch_dialog_state(conn, session_id)
-        product_list = await fetch_product_list(conn, session_id)
-        product_id = await fetch_product_id(conn, session_id)
+        first_dialog = await fetch_is_first_dialog(conn, user_companychat)
+        # dialog_state = await fetch_dialog_state(conn, session_id)
+        # product_list = await fetch_product_list(conn, session_id)
+        # product_id = await fetch_product_id(conn, session_id)
+        # available_time = await fetch_avaliable_time(conn, session_id)
+        # avaliable_sequences = await fetch_avaliable_sequences(conn, session_id)
         user_info = await fetch_personal_info(user_id)
 
         data = {
@@ -63,18 +67,44 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
             **channel_info,
             "prompts_info": prompts_info,
             "category": category,
+            "products_full" : products_full,
             "probny": probny,
-            "dialog_state": dialog_state,
-            "product_list": product_list,
-            "product_id": product_id,
+            "first_dialog": first_dialog,
+            # "dialog_state": dialog_state,
+            # "product_list": product_list,
+            # "product_id": product_id,
             "user_info": user_info,
-            "dialog": dialog,
-            "query": query,
+            # "dialog": dialog,
+            # "query": query,
+            # "available_time": available_time,
+            # "avaliable_sequences": avaliable_sequences
         }
         flat_data = flatten_dict_no_prefix(data)
         return {"data": flat_data}
     finally:
         await conn.close()
+
+async def data_user_info(user_companychat: int) -> dict[str, Any]:
+    """Функция получения данных о пользователе и компании из Postgres."""
+    conn = await asyncpg.connect(**POSTGRES_CONFIG)
+    try:
+        # 1) Канальный контекст
+        channel_info = await fetch_channel_info(conn, user_companychat)
+        user_id = channel_info["user_id"]
+        user_info = await fetch_personal_info(user_id)
+
+        data = {
+            "user_id": user_id,
+            "date_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            **channel_info,
+            "user_info": user_info,
+        }
+        flat_data = flatten_dict_no_prefix(data)
+        return {"data": flat_data}
+    finally:
+        await conn.close()
+
+
 
 
 @retry_async()
@@ -99,6 +129,50 @@ async def fetch_dialog(conn: asyncpg.Connection, user_companychat: int) -> Any:
     joined_messages = "\n".join(messages)
     query = rows[-1]["message"]
     return joined_messages, query
+
+
+@retry_async()
+async def fetch_key_words(conn: asyncpg.Connection, user_companychat: int) -> Any:
+    """Получение ключевых фраз"""
+    conn = await asyncpg.connect(**POSTGRES_CONFIG)
+    
+    rows = await conn.fetch(
+        """
+        SELECT
+        
+        FROM public.bot_history u
+        WHERE u.user_companychat = $1
+        AND u.indata NOT IN ('стоп', 'Память очищена')
+        ORDER BY u.id;
+        """,
+        user_companychat,
+    )
+
+    if not rows:
+        return "", ""
+
+    messages = [record["message"] for record in rows[:-1]]
+    joined_messages = "\n".join(messages)
+    query = rows[-1]["message"]
+    return joined_messages, query
+
+
+
+@retry_async()
+async def fetch_is_first_dialog(conn: asyncpg.Connection, user_companychat: int) -> bool:
+    """Определение, что диалог с ботом ведётся впервые"""
+    count = await conn.fetchval(
+        """
+        SELECT count(*)
+        FROM public.bot_history 
+        WHERE user_companychat = $1
+        AND indata NOT IN ('стоп', 'Память очищена')
+        """,
+        user_companychat,
+    )
+    logger.info(f"=====fetch_is_first_dialog=====")
+    logger.info(f"count: {count}")
+    return count == 1
 
 
 @retry_async()
@@ -196,6 +270,31 @@ async def fetch_category(conn: asyncpg.Connection, channel_id: int) -> str:
     )
     string_category = ", \n".join(list_category)
     return string_category
+
+@retry_async()
+async def fetch_services(conn: asyncpg.Connection, channel_id: int) -> str:
+    """Получение товаров/услуг. Это нужно для компаний с малым количеством услуг.
+    Для примера Алена с количеством услуг 5 шт. channel_id=20"""
+
+    if channel_id not in [20]:
+        return []
+
+    rows: List[asyncpg.Record] = await conn.fetch(
+        """
+        SELECT DISTINCT
+            p.product_name,
+            p.article
+        FROM products p
+        WHERE p.channel_id = $1
+        LIMIT 6
+        """,
+        channel_id,  # без кортежа
+    )
+    list_category: List[str] = (
+        [f"{idx+1}. ID:{row['article']} - {row['product_name']}" for idx, row in enumerate(rows)] if rows else []
+    )
+    string_services = ", \n".join(list_category)
+    return string_services
 
 
 @retry_async()
@@ -359,6 +458,75 @@ async def fetch_product_id(conn: asyncpg.Connection, session_id: int) -> dict[st
 
 
 @retry_async()
+async def fetch_avaliable_time(conn: asyncpg.Connection, session_id: int) -> dict[str, Any]:
+    """Получение id и названия выбранного клиентов товара/услуги."""
+    row: asyncpg.Record | None = await conn.fetchrow(
+        """
+        SELECT
+            ds.id,
+            (ds.data -> 'available_time' -> 'avaliable_time_for_master')::text AS available_time
+        FROM dialog_state ds
+        WHERE ds.name = 'available_time'
+          AND ds.session_id = $1
+        ORDER BY ds.id DESC
+        LIMIT 1
+        """,
+        session_id,
+    )
+    if not row:
+        return {"available_time": None}
+
+    # ::text может вернуть строку в кавычках, аккуратно снимаем их
+    def normalize_text(val: str | None) -> str | None:
+        """Нормальзация текста."""
+        if val is None:
+            return None
+        s = str(val).strip()
+        if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+            s = s[1:-1]
+        return s
+
+    available_time = normalize_text(row["available_time"])
+
+    return {"available_time": available_time}
+
+
+@retry_async()
+async def fetch_avaliable_sequences(conn: asyncpg.Connection, session_id: int) -> dict[str, Any]:
+    """Получение id и названия выбранного клиентов товара/услуги."""
+    row: asyncpg.Record | None = await conn.fetchrow(
+        """
+        SELECT
+            ds.id,
+            (ds.data -> 'available_time' -> 'available_sequences')::text AS available_sequences
+        FROM dialog_state ds
+        WHERE ds.name = 'available_time'
+          AND ds.session_id = $1
+        ORDER BY ds.id DESC
+        LIMIT 1
+        """,
+        session_id,
+    )
+    if not row:
+        return {"available_sequences": None}
+
+    # ::text может вернуть строку в кавычках, аккуратно снимаем их
+    def normalize_text(val: str | None) -> str | None:
+        """Нормальзация текста."""
+        if val is None:
+            return None
+        s = str(val).strip()
+        if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+            s = s[1:-1]
+        return s
+
+    available_sequences = normalize_text(row["available_sequences"])
+
+    return {"available_sequences": available_sequences}
+
+
+
+@retry_async()
 async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
     """Удаление истории диалога. Используется для тестирования."""
     conn = await asyncpg.connect(**POSTGRES_CONFIG)
@@ -374,25 +542,16 @@ async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
         success = False
         try:
             async with conn.transaction():
-                await conn.execute(
+
+                del_dialog_state = await conn.execute(
                     "DELETE FROM dialog_state WHERE session_id = $1", session_id
                 )
-                await conn.execute(
-                    "DELETE FROM agent_chat_histories WHERE session_id = $1", session_id
-                )
-                await conn.execute(
-                    """
-                                    DELETE FROM bot_history
-                                    WHERE user_companychat = $1
-                                    AND id < (
-                                        SELECT MAX(id)
-                                        FROM bot_history
-                                        WHERE user_companychat = $1
-                                    );
-                                    """,
-                    user_companychat,
+                del_bot_history  = await conn.execute(
+                    "DELETE FROM public.bot_history bh WHERE bh.user_companychat = $1;",
+                    user_companychat
                 )
             success = True
+            logger.info(f"Данные из истории удалены: {del_bot_history}, {del_dialog_state}")
         except Exception as e:
             logger.error(f"Error deleting history messages: {e}")
             success = False
@@ -400,3 +559,81 @@ async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
         return {"success": success}
     finally:
         await conn.close()
+
+
+@retry_async()
+async def delete_personal_data(user_companychat: int) -> Dict[str, Any]:
+    """Удаление истории диалога. Используется для тестирования."""
+    logger.info("===delete_personal_data===")
+    conn = await asyncpg.connect(**POSTGRES_CONFIG)
+    try:
+        channel_info = await fetch_channel_info(conn, user_companychat)
+        logger.info(f"channel_info: {channel_info}")
+        # session_id = channel_info.get("session_id")
+        # if not session_id:
+        #     logger.error(
+        #         f"Session ID not found for user_companychat={user_companychat}"
+        #     )
+        #     return {"success": False, "error": "session_id not found"}
+
+        success = False
+        try:
+            async with conn.transaction():
+                user_id = await conn.fetchval(
+                    '''
+                    select u.id
+                    from contact_companychat cc
+                    join "user" u on u.user_id = cc.user_chattype_id
+                    where cc.id = $1
+                    ''',
+                    user_companychat,
+                )
+                logger.info("user_id: %s", user_id)
+                del_personal_data_consent = await conn.execute(
+                    "DELETE FROM personal_data_consent WHERE user_id = $1", user_id
+                )
+                del_personal_data = await conn.execute(
+                    "DELETE FROM personal_data WHERE user_id = $1", user_id
+                )
+                del_user= await conn.execute(
+                    'DELETE FROM "user" WHERE id = $1', user_id
+                )
+
+            success = True
+            logger.info(f"Персональные данные удалены: {del_personal_data_consent}, {del_personal_data}, {del_user}")
+        except Exception as e:
+            logger.error(f"Error deleting history messages: {e}")
+            success = False
+
+        return {"success": success}
+    finally:
+        await conn.close()
+
+
+
+@retry_async()
+async def save_query_from_human_in_postgres(user_companychat: int, query: str) -> bool:
+    """Сохранение запроса клиента в Postgres. Необходимо при тестировании в Studio."""
+    conn = await asyncpg.connect(**POSTGRES_CONFIG)
+    try:
+        await conn.execute(
+            """
+            INSERT INTO bot_history 
+            (user_companychat, is_bot, for_user, dialog_state_id, created_at, indata)
+            VALUES 
+            ($1, $2, $3, $4, $5, $6)
+            """,
+            user_companychat,  # $1
+            0,                 # $2
+            False,             # $3
+            1,                 # $4
+            datetime.now(),    # $5
+            query              # $6
+        )
+        success = True
+    except Exception as e:
+        logger.error(f"Error saving query to bot_history: {e}")
+        success = False
+    finally:
+        await conn.close()
+        return success

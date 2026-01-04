@@ -14,7 +14,15 @@ RUN for dep in /deps/*; do \
     done
 
 # ========== ENV-переменные для Langserve =============
-ENV LANGSERVE_GRAPHS='{"agent_zena": "src.zena_agent:graph"}'
+ENV LANGSERVE_GRAPHS='{ \
+    "agent_zena_5001": "src.zena_create_graph:graph_5001", \
+    "agent_zena_5002": "src.zena_create_graph:graph_5002", \
+    "agent_zena_5005": "src.zena_create_graph:graph_5005", \
+    "agent_zena_5006": "src.zena_create_graph:graph_5006", \
+    "agent_zena_5007": "src.zena_create_graph:graph_5007", \
+    "agent_zena_5020": "src.zena_create_graph:graph_5020" \
+}'
+
 ENV IS_DOCKER=1
 
 # ========== Проверить/обновить служебные модули =======

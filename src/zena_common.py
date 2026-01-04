@@ -1,12 +1,18 @@
 """Модуль реализует общие функции."""
 
+import os
 import asyncio
 import inspect
 import logging
 import random
-from functools import wraps
+import httpx
 
+from functools import wraps
+from dotenv import load_dotenv
 from typing_extensions import Any, Awaitable, Callable, TypeVar
+
+from langchain.chat_models import init_chat_model
+
 
 T = TypeVar("T")
 
@@ -18,6 +24,46 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)  # создаём логгер для текущего модуля
+
+
+load_dotenv()
+
+openai_proxy = os.getenv("OPENAI_PROXY_URL")
+openai_model_4o_mini = os.getenv("OPENAI_MODEL_4O_MINI")
+openai_model_4o = os.getenv("OPENAI_MODEL_4O")
+openai_api_key = os.getenv("OPENAI_API_KEY")
+openai_api_key_reserv = os.getenv("OPENAI_API_KEY_RESERV")
+
+model_4o_mini = init_chat_model(
+    model=openai_model_4o_mini,
+    api_key=openai_api_key,
+    temperature=0,
+    http_async_client=httpx.AsyncClient(
+        proxy=openai_proxy,
+        timeout=60.0
+    ),
+)
+
+model_4o_mini_reserv = init_chat_model(
+    model=openai_model_4o_mini,
+    api_key=openai_api_key_reserv,
+    temperature=0,
+    http_async_client=httpx.AsyncClient(
+        proxy=openai_proxy,
+        timeout=60.0
+    ),
+)
+
+
+model_4o = init_chat_model(
+    model=openai_model_4o,
+    api_key=openai_api_key,
+    temperature=0,
+    http_async_client=httpx.AsyncClient(
+        proxy=openai_proxy,
+        timeout=60.0
+    ),
+)
 
 
 # -------------------- Декоратор Retry helper --------------------
