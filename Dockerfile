@@ -15,12 +15,12 @@ RUN for dep in /deps/*; do \
 
 # ========== ENV-переменные для Langserve =============
 ENV LANGSERVE_GRAPHS='{ \
-    "agent_zena_5001": "src.zena_create_graph:graph_5001", \
-    "agent_zena_5002": "src.zena_create_graph:graph_5002", \
-    "agent_zena_5005": "src.zena_create_graph:graph_5005", \
-    "agent_zena_5006": "src.zena_create_graph:graph_5006", \
-    "agent_zena_5007": "src.zena_create_graph:graph_5007", \
-    "agent_zena_5020": "src.zena_create_graph:graph_5020" \
+    "agent_zena_alisa": "src.zena_create_graph:graph_alisa", \
+    "agent_zena_sofia": "src.zena_create_graph:graph_sofia", \
+    "agent_zena_anisa": "src.zena_create_graph:graph_anisa", \
+    "agent_zena_annitta": "src.zena_create_graph:graph_annitta", \
+    "agent_zena_anastasia": "src.zena_create_graph:graph_anastasia", \
+    "agent_zena_alena": "src.zena_create_graph:graph_alena" \
 }'
 
 ENV IS_DOCKER=1

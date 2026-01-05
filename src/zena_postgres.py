@@ -6,12 +6,17 @@ from datetime import datetime
 
 import asyncpg
 from dotenv import load_dotenv
+from pathlib import Path
 from typing_extensions import Any, Dict, List
 
 from .zena_common import logger, retry_async
 from .zena_requests import fetch_personal_info
 
-load_dotenv()
+if not os.getenv("IS_DOCKER"):
+    ROOT = Path(__file__).resolve().parents[3]
+    dotenv_path = ROOT / "deploy" / "dev.env"
+    load_dotenv(dotenv_path=dotenv_path)
+
 
 POSTGRES_CONFIG = {
     "user": os.getenv("POSTGRES_USER"),

@@ -1,5 +1,6 @@
 """Создание системых графов/шаблонов для каждой компании."""
 
+import os
 import asyncio
 
 from langgraph.graph import END, START, StateGraph
@@ -26,9 +27,16 @@ async def create_agent_graph(port: int):
     return workflow.compile()
 
 
-graph_5001 = asyncio.run(create_agent_graph(5001))
-graph_5002 = asyncio.run(create_agent_graph(5002))
-graph_5005 = asyncio.run(create_agent_graph(5005))
-graph_5006 = asyncio.run(create_agent_graph(5006))
-graph_5007 = asyncio.run(create_agent_graph(5007))
-graph_5020 = asyncio.run(create_agent_graph(5020))
+MCP_PORT_ALISA = os.getenv("MCP_PORT_ALISA") # 5001 / 15001
+MCP_PORT_SOFIA = os.getenv("MCP_PORT_SOFIA") # 5002 / 15002
+MCP_PORT_ANISA = os.getenv("MCP_PORT_ANISA") # 5005 / 15005
+MCP_PORT_ANNITTA = os.getenv("MCP_PORT_ANNITTA") # 5006 / 15006
+MCP_PORT_ANASTASIA = os.getenv("MCP_PORT_ANASTASIA") # 5007 / 15007
+MCP_PORT_ALENA = os.getenv("MCP_PORT_ALENA") # 5020 / 15020
+
+graph_alisa = asyncio.run(create_agent_graph(MCP_PORT_ALISA))
+graph_sofia = asyncio.run(create_agent_graph(MCP_PORT_SOFIA))
+graph_anisa = asyncio.run(create_agent_graph(MCP_PORT_ANISA))
+graph_annitta = asyncio.run(create_agent_graph(MCP_PORT_ANNITTA))
+graph_anastasia = asyncio.run(create_agent_graph(MCP_PORT_ANASTASIA))
+graph_alena = asyncio.run(create_agent_graph(MCP_PORT_ALENA))

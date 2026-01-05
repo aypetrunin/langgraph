@@ -8,6 +8,7 @@ import random
 import httpx
 
 from functools import wraps
+from pathlib import Path
 from dotenv import load_dotenv
 from typing_extensions import Any, Awaitable, Callable, TypeVar
 
@@ -26,7 +27,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)  # создаём логгер для текущего модуля
 
 
-load_dotenv()
+if not os.getenv("IS_DOCKER"):
+    ROOT = Path(__file__).resolve().parents[3]
+    dotenv_path = ROOT / "deploy" / "dev.env"
+    load_dotenv(dotenv_path=dotenv_path)
 
 openai_proxy = os.getenv("OPENAI_PROXY_URL")
 openai_model_4o_mini = os.getenv("OPENAI_MODEL_4O_MINI")
