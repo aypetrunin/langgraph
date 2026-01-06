@@ -44,85 +44,114 @@ class ToolSelectorMiddleware(AgentMiddleware):
     """Middleware для выбора релевантных инструментов по состоянию диалога."""
 
     async def _select_relevant_tools(
-            self,
-            state: State, 
-            tools: list[StructuredTool]
+        self,
+        state: State,
+        tools: list[StructuredTool],
     ) -> list[StructuredTool]:
-        """Выбора релевантных инструментов по состоянию диалога."""
-        
+
         logger.info("===wrap_model_call===_select_relevant_tools===")
 
-        data = state.get("data", {}) 
+        data = state.get("data", {}) or {}
         mcp_port = data.get("mcp_port")
         dialog_state = data.get("dialog_state")
 
         logger.info(f"dialog_state: {dialog_state}")
         logger.info(f"mcp_port: {mcp_port}")
+        logger.info(f"all_tools: {[t.name for t in tools]}")
 
-        print([tool.name for tool in tools])
+        allowed = self._build_allowed_tools(mcp_port=mcp_port, dialog_state=dialog_state, data=data)
 
+        filtered = [tool for tool in tools if tool.name in allowed]
+        logger.info(f"tools: {[t.name for t in filtered]}")
+        return filtered
 
-        # Подключение инструментов ы зависисмости от стадии диалога.
-        if mcp_port in [4007, 5007]:
+    # -------------------------
+    # Builders
+    # -------------------------
 
-            allowed = {"zena_faq", "zena_services"}
+    def _build_allowed_tools(self, *, mcp_port: int | None, dialog_state: str | None, data: dict) -> set[str]:
+        # дефолтный набор, если порт неизвестен
+        if mcp_port is None:
+            return {"zena_faq"}
 
-            if dialog_state in ["new"]:
-                print('dialog_state in ["new"]')
-                allowed.update({"zena_record_product_id_list"})
+        if mcp_port in {4007, 5007}:
+            return self._allowed_for_4007_5007(dialog_state)
 
-            elif dialog_state in ["remember"]:
-                allowed.update({"zena_remember_product_id_list"})
-                allowed.update({"zena_avaliable_time_for_master_list"})
+        if mcp_port in {4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006}:
+            return self._allowed_for_classic_ports(dialog_state)
 
-            elif dialog_state in ["available_time"]:
-                allowed.update({"zena_remember_product_id_list"})
-                allowed.update({"zena_avaliable_time_for_master_list"})
-                allowed.update({"zena_record_time"})
-            
-            elif dialog_state in ["postrecord"]:
-                allowed.update({"zena_recommendations"})
-        
-        elif mcp_port in [4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006,]:
-            
-            allowed = {"zena_faq", "zena_services", "zena_product_search"}
+        if mcp_port == 5020:
+            return self._allowed_for_5020(dialog_state, data)
 
-            if dialog_state not in ["new"]:
-                allowed.update({"zena_remember_product_id"})
+        # неизвестный порт
+        return {"zena_faq"}
 
-            if dialog_state not in ["new", "selecting"]:
-                allowed.update({"zena_avaliable_time_for_master"})
-                allowed.update({"zena_record_time"})
-        
-        elif mcp_port in [5020]:
-            
-            allowed = {"zena_faq"}
+    def _allowed_for_4007_5007(self, dialog_state: str | None) -> set[str]:
+        allowed = {"zena_faq", "zena_services"}
 
-            phone = data.get('phone')
-            onboarding_stage = data.get("onboarding", {}).get("onboarding_stage")
-            onboarding_status = data.get("onboarding", {}).get("onboarding_status")
+        match dialog_state:
+            case "new":
+                allowed.add("zena_record_product_id_list")
 
-            # Если обычный режим диалога
-            if (onboarding_status is None or onboarding_status) and phone != '':
+            case "remember":
+                allowed |= {"zena_remember_product_id_list", "zena_avaliable_time_for_master_list"}
 
-                allowed.add("zena_get_client_statistics")
+            case "available_time":
+                allowed |= {
+                    "zena_remember_product_id_list",
+                    "zena_avaliable_time_for_master_list",
+                    "zena_record_time",
+                }
 
-                if dialog_state == "new":
-                    allowed.add("zena_get_client_lessons")
+            case "postrecord":
+                allowed.add("zena_recommendations")
 
-                if dialog_state == "selecting":
-                    allowed.add("zena_remember_lesson_id")
+            case _:
+                pass
 
-                if dialog_state == "remember":
-                    allowed.add("zena_update_client_lesson")
+        return allowed
 
-            # Если режим - опроса.
-            else:
-                if onboarding_stage and onboarding_stage >= 5:
-                    allowed.add("zena_update_client_info")
+    def _allowed_for_classic_ports(self, dialog_state: str | None) -> set[str]:
+        # базовый набор
+        allowed = {"zena_faq", "zena_services", "zena_product_search"}
 
-        logger.info(f"tools: {[tool.name for tool in tools if tool.name in allowed]}")
-        return [tool for tool in tools if tool.name in allowed]
+        if dialog_state != "new":
+            allowed.add("zena_remember_product_id")
+
+        if dialog_state not in ("new", "selecting"):
+            allowed |= {"zena_avaliable_time_for_master", "zena_record_time"}
+
+        # ВАЖНО: у тебя тут "обнуление" (оставляем только recommendations)
+        if dialog_state == "postrecord":
+            return {"zena_recommendations"}
+
+        return allowed
+
+    def _allowed_for_5020(self, dialog_state: str | None, data: dict) -> set[str]:
+        allowed = {"zena_faq"}
+
+        phone = (data.get("phone") or "").strip()
+        onboarding = data.get("onboarding") or {}
+        onboarding_stage = onboarding.get("onboarding_stage")
+        onboarding_status = onboarding.get("onboarding_status")
+
+        # обычный режим диалога
+        if (onboarding_status is None or onboarding_status is True) and phone:
+            allowed.add("zena_get_client_statistics")
+
+            if dialog_state == "new":
+                allowed.add("zena_get_client_lessons")
+            elif dialog_state == "selecting":
+                allowed.add("zena_remember_lesson_id")
+            elif dialog_state == "remember":
+                allowed.add("zena_update_client_lesson")
+
+        # режим опроса
+        else:
+            if isinstance(onboarding_stage, int) and onboarding_stage >= 5:
+                allowed.add("zena_update_client_info")
+
+        return allowed
 
 
     async def _select_model (self, state: State) -> BaseChatModel:
@@ -187,3 +216,89 @@ async def personalized_prompt(request: ModelRequest) -> str:
     logger.info(f"system_prompt:\n{system_prompt}")
 
     return system_prompt
+
+
+    # async def _select_relevant_tools(
+    #         self,
+    #         state: State, 
+    #         tools: list[StructuredTool]
+    # ) -> list[StructuredTool]:
+    #     """Выбора релевантных инструментов по состоянию диалога."""
+        
+    #     logger.info("===wrap_model_call===_select_relevant_tools===")
+
+    #     data = state.get("data", {}) 
+    #     mcp_port = data.get("mcp_port")
+    #     dialog_state = data.get("dialog_state")
+
+    #     logger.info(f"dialog_state: {dialog_state}")
+    #     logger.info(f"mcp_port: {mcp_port}")
+
+    #     print([tool.name for tool in tools])
+
+
+    #     # Подключение инструментов ы зависисмости от стадии диалога.
+    #     if mcp_port in [4007, 5007]:
+
+    #         allowed = {"zena_faq", "zena_services"}
+
+    #         if dialog_state in ["new"]:
+    #             print('dialog_state in ["new"]')
+    #             allowed.update({"zena_record_product_id_list"})
+
+    #         elif dialog_state in ["remember"]:
+    #             allowed.update({"zena_remember_product_id_list"})
+    #             allowed.update({"zena_avaliable_time_for_master_list"})
+
+    #         elif dialog_state in ["available_time"]:
+    #             allowed.update({"zena_remember_product_id_list"})
+    #             allowed.update({"zena_avaliable_time_for_master_list"})
+    #             allowed.update({"zena_record_time"})
+            
+    #         elif dialog_state in ["postrecord"]:
+    #             allowed.update({"zena_recommendations"})
+        
+    #     elif mcp_port in [4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006,]:
+            
+    #         allowed = {"zena_faq", "zena_services", "zena_product_search"}
+
+    #         if dialog_state not in ["new"]:
+    #             allowed.update({"zena_remember_product_id"})
+
+    #         if dialog_state not in ["new", "selecting"]:
+    #             allowed.update({"zena_avaliable_time_for_master"})
+    #             allowed.update({"zena_record_time"})
+
+    #         if dialog_state in ["postrecord"]:
+    #             allowed = set() 
+    #             allowed.update({"zena_recommendations"})
+                
+    #     elif mcp_port in [5020]:
+            
+    #         allowed = {"zena_faq"}
+
+    #         phone = data.get('phone')
+    #         onboarding_stage = data.get("onboarding", {}).get("onboarding_stage")
+    #         onboarding_status = data.get("onboarding", {}).get("onboarding_status")
+
+    #         # Если обычный режим диалога
+    #         if (onboarding_status is None or onboarding_status) and phone != '':
+
+    #             allowed.add("zena_get_client_statistics")
+
+    #             if dialog_state == "new":
+    #                 allowed.add("zena_get_client_lessons")
+
+    #             if dialog_state == "selecting":
+    #                 allowed.add("zena_remember_lesson_id")
+
+    #             if dialog_state == "remember":
+    #                 allowed.add("zena_update_client_lesson")
+
+    #         # Если режим - опроса.
+    #         else:
+    #             if onboarding_stage and onboarding_stage >= 5:
+    #                 allowed.add("zena_update_client_info")
+
+    #     logger.info(f"tools: {[tool.name for tool in tools if tool.name in allowed]}")
+    #     return [tool for tool in tools if tool.name in allowed]
