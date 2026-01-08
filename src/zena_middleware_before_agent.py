@@ -196,10 +196,33 @@ class GetKeyWordMiddleware(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
 
-
+        logger.info("===GetKeyWordMiddleware===")
         try:
-            pass
+            channel_id = state["data"]["channel_id"]
+
+            messages = state["messages"]
+            last_msg_content: Union[str, list[BaseMessage], None] = (
+                messages[-1].content if messages else None
+            )
+            last_message = _content_to_text(last_msg_content).strip()
+
+            logger.info(f"last_message: {last_message}")
+
+            promo = await fetch_key_words(channel_id, last_message)
+            logger.info(f"promo: {promo}")
+
+            if not promo:
+                return None
             
+            data = state.get('data')
+            data['items_search'] = promo
+            data['dialog_state'] = 'promo'
+
+            logger.info(f"data: {data}")
+
+            return {
+                **data
+            }
 
         except Exception as err:
             logger.exception("GetKeyWordMiddleware error: %s", err)
@@ -207,12 +230,6 @@ class GetKeyWordMiddleware(AgentMiddleware):
                 "messages": [AIMessage(content="Бот временно не работает")],
                 "jump_to": "end",
             }
-
-            last_massges = state['messages'][-1]
-            channel_id = state['data']['channel_id']
-
-            key_words = await fetch_key_words
-
 
 # class GetDatabaseMiddleware(AgentMiddleware):
 #     """Middleware реализует функцию чтения данных из базы данных."""

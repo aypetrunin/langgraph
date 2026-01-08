@@ -27,6 +27,7 @@ from .zena_middleware_before_agent import (
     VerifyInputMessage,
     GetDatabaseMiddleware,
     GetCRMGOMiddleware,
+    GetKeyWordMiddleware,
     # DynamicMCPPortMiddleware,
 )
 from .zena_middleware_wrap_model import (
@@ -83,6 +84,7 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
         middleware=[
             VerifyInputMessage(),
             GetDatabaseMiddleware(),
+            GetKeyWordMiddleware(),
             # GetCRMGOMiddleware(),
             # DynamicMCPPortMiddleware(),
             DynamicSystemPrompt(),
