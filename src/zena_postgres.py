@@ -7,7 +7,7 @@ from datetime import datetime
 import asyncpg
 from dotenv import load_dotenv
 from pathlib import Path
-from typing_extensions import Any, Dict, List
+from typing_extensions import Any, Dict, List, Iterable
 
 from .zena_common import logger, retry_async
 from .zena_requests import fetch_personal_info
@@ -110,8 +110,6 @@ async def data_user_info(user_companychat: int) -> dict[str, Any]:
         await conn.close()
 
 
-
-
 @retry_async()
 async def fetch_dialog(conn: asyncpg.Connection, user_companychat: int) -> Any:
     """Получение диалога."""
@@ -126,7 +124,6 @@ async def fetch_dialog(conn: asyncpg.Connection, user_companychat: int) -> Any:
         """,
         user_companychat,
     )
-
     if not rows:
         return "", ""
 
@@ -134,33 +131,69 @@ async def fetch_dialog(conn: asyncpg.Connection, user_companychat: int) -> Any:
     joined_messages = "\n".join(messages)
     query = rows[-1]["message"]
     return joined_messages, query
+
+
+
+def pg_rows_to_products(rows: Iterable[asyncpg.Record]) -> list[dict[str, Any]]:
+    """Преобразует asyncpg rows в формат продуктов, идентичный points_to_list."""
+    result: list[dict[str, Any]] = []
+
+    for r in rows:
+        if not r:
+            continue
+
+        price_min = r.get("price_min")
+        price_max = r.get("price_max")
+
+        result.append({
+            "product_id": r.get("product_id"),
+            "product_name": r.get("product_name"),
+            "description": r.get("description"),
+            "duration": r.get("duration"),
+            "price": (
+                f"{price_min} руб."
+                if price_min == price_max
+                else f"{price_min} - {price_max} руб."
+            )
+            if price_min is not None and price_max is not None
+            else None,
+        })
+
+    return result
 
 
 @retry_async()
-async def fetch_key_words(conn: asyncpg.Connection, user_companychat: int) -> Any:
+async def fetch_key_words(channel_id: int, key_word: str) -> Any:
     """Получение ключевых фраз"""
     conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    
-    rows = await conn.fetch(
-        """
-        SELECT
-        
-        FROM public.bot_history u
-        WHERE u.user_companychat = $1
-        AND u.indata NOT IN ('стоп', 'Память очищена')
-        ORDER BY u.id;
-        """,
-        user_companychat,
-    )
+    try:
+        rows = await conn.fetch(
+            """
+            select distinct on (p2.product_name)
+                p2.channel_id,
+                p2.article as product_id,
+                p2.product_name,
+                p2.price_min,
+                p2.price_max,
+                p2.time_minutes as duration,
+                p2.description
+            from promo p
+            join products p2 on p2.product_name = p.service
+            where p.channel_id = $1
+              and p.key_word = $2
+            order by
+                p2.product_name,
+                case when p2.channel_id = $1 then 0 else 1 end;
+            """,
+            channel_id, key_word
+        )
 
-    if not rows:
-        return "", ""
+        if not rows:
+            return []
 
-    messages = [record["message"] for record in rows[:-1]]
-    joined_messages = "\n".join(messages)
-    query = rows[-1]["message"]
-    return joined_messages, query
-
+        return pg_rows_to_products(rows)
+    finally:
+        await conn.close()
 
 
 @retry_async()
