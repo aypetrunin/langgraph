@@ -237,11 +237,21 @@ async def pp_product_search(result: ToolMessage, request: ToolCallRequest) -> An
 
 TOOL_POSTPROCESSORS_DEFAULT: dict[str, PostProcessor] = {
     "zena_avaliable_time_for_master": pp_available_time_for_master,
-    "zena_available_time_for_master_list": pp_available_time_for_master_list,
     "zena_record_time": pp_record_time,
     "zena_recommendations": pp_recommendations,
     "zena_product_search": pp_product_search,
     "zena_remember_product_id": pp_product_remember,
+    # NEW: remember user inputs
+    "zena_remember_office": pp_remember_office,
+    "zena_remember_desired_date": pp_remember_desired_date,
+    "zena_remember_desired_time": pp_remember_desired_time,
+}
+
+TOOL_POSTPROCESSORS_5007: dict[str, PostProcessor] = {
+    "zena_available_time_for_master_list": pp_available_time_for_master_list,
+    "zena_record_time": pp_record_time,
+    "zena_recommendations": pp_recommendations,
+    "zena_product_search": pp_product_search,
     "zena_remember_product_id_list": pp_product_remember,
     # NEW: remember user inputs
     "zena_remember_office": pp_remember_office,
