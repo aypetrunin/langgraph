@@ -42,7 +42,7 @@ from .zena_middleware_after_agent import (
     ResetData,
 )
 from .zena_middleware_before_model import (
-    SaveResultToolsMiddleware,
+    # SaveResultToolsMiddleware,
     TrimMessages,
 )
 from .zena_middleware_after_model import (
