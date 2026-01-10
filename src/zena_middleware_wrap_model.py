@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+from typing import Any, Callable
+
+
 import aiofiles
 
 from pathlib import Path
@@ -40,20 +45,68 @@ class DynamicSystemPrompt(AgentMiddleware):
         return await handler(request.override(system_prompt=system_prompt))
 
 
+# tool_selector_middleware.py
+# Полная версия для вставки:
+# - globals: zena_faq, zena_services + remember-tools доступны всегда (state-neutral)
+# - inherit_previous: инструменты предыдущих стадий доступны на текущей (classic ports)
+# - guards: слоты только если есть office_id+desired_date; запись только если есть контакты+desired_time
+# - postrecord override: после записи только zena_recommendations
+
+
 class ToolSelectorMiddleware(AgentMiddleware):
-    """Middleware для выбора релевантных инструментов по состоянию диалога."""
+    """Middleware для выбора релевантных инструментов по состоянию диалога + guards."""
 
-    async def _select_relevant_tools(
-        self,
-        state: State,
-        tools: list[StructuredTool],
-    ) -> list[StructuredTool]:
+    # ---------- FSM config ----------
+    ORDER = ["new", "selecting", "remember", "available_time", "postrecord"]
 
+    # Глобальные инструменты (доступны всегда, не меняют dialog_state)
+    GLOBAL_TOOLS: set[str] = {
+        "zena_faq",
+        "zena_services",
+        # remember tools (всегда доступны, т.к. клиент может назвать их где угодно)
+        "zena_remember_office",
+        "zena_remember_desired_date",
+        "zena_remember_desired_time",
+    }
+
+    # Stage tools для classic портов (400x/500x)
+    # ВАЖНО: используй ТОЧНЫЕ имена инструментов, как они зарегистрированы.
+    STAGE_TOOLS_CLASSIC: dict[str, set[str]] = {
+        "new": {"zena_product_search"},
+        "selecting": {
+            "zena_product_search",
+            "zena_remember_product_id",
+            "zena_remember_product_id_list",
+        },
+        "remember": {
+            "zena_avaliable_time_for_master",
+            "zena_available_time_for_master_list",
+        },
+        "available_time": {
+            "zena_record_time",
+            "zena_avaliable_time_for_master",
+            "zena_available_time_for_master_list",
+        },
+        "postrecord": {"zena_recommendations"},
+    }
+
+    # postrecord override: жёстко только recommendations
+    POSTRECORD_OVERRIDE: set[str] = {"zena_recommendations"}
+
+    # ---------- ports ----------
+    CLASSIC_PORTS = {4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006}
+    PORTS_4007_5007 = {4007, 5007}
+    PORT_5020 = {5020}
+
+    # -------------------------
+    # Main selection
+    # -------------------------
+    async def _select_relevant_tools(self, state: dict, tools: list[StructuredTool]) -> list[StructuredTool]:
         logger.info("===wrap_model_call===_select_relevant_tools===")
 
         data = state.get("data", {}) or {}
         mcp_port = data.get("mcp_port")
-        dialog_state = data.get("dialog_state")
+        dialog_state = (data.get("dialog_state") or "new").strip()
 
         logger.info(f"dialog_state: {dialog_state}")
         logger.info(f"mcp_port: {mcp_port}")
@@ -62,75 +115,134 @@ class ToolSelectorMiddleware(AgentMiddleware):
         allowed = self._build_allowed_tools(mcp_port=mcp_port, dialog_state=dialog_state, data=data)
 
         filtered = [tool for tool in tools if tool.name in allowed]
-        logger.info(f"tools: {[t.name for t in filtered]}")
+        logger.info(f"allowed_tools: {sorted(allowed)}")
+        logger.info(f"tools_filtered: {[t.name for t in filtered]}")
         return filtered
 
-    # -------------------------
-    # Builders
-    # -------------------------
+    def _build_allowed_tools(self, *, mcp_port: int | None, dialog_state: str, data: dict) -> set[str]:
+        # Всегда разрешаем globals (FAQ/Services/Remember*)
+        base = set(self.GLOBAL_TOOLS)
 
-    def _build_allowed_tools(self, *, mcp_port: int | None, dialog_state: str | None, data: dict) -> set[str]:
-        # дефолтный набор, если порт неизвестен
         if mcp_port is None:
-            return {"zena_faq"}
+            return base
 
-        if mcp_port in {4007, 5007}:
-            return self._allowed_for_4007_5007(dialog_state)
+        if mcp_port in self.PORT_5020:
+            return self._allowed_for_5020(dialog_state, data, base)
 
-        if mcp_port in {4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006}:
-            return self._allowed_for_classic_ports(dialog_state)
+        if mcp_port in self.PORTS_4007_5007:
+            return self._allowed_for_4007_5007(dialog_state, data, base)
 
-        if mcp_port == 5020:
-            return self._allowed_for_5020(dialog_state, data)
+        if mcp_port in self.CLASSIC_PORTS:
+            return self._allowed_for_classic_ports(dialog_state, data, base)
 
-        # неизвестный порт
-        return {"zena_faq"}
+        return base
 
-    def _allowed_for_4007_5007(self, dialog_state: str | None) -> set[str]:
-        allowed = {"zena_faq", "zena_services"}
+    # -------------------------
+    # Classic ports
+    # -------------------------
+    def _allowed_for_classic_ports(self, dialog_state: str, data: dict, base: set[str]) -> set[str]:
+        # postrecord override
+        if dialog_state == "postrecord":
+            return set(self.POSTRECORD_OVERRIDE)
+
+        allowed = set(base)
+
+        # inherit_previous: stage tools всех стадий <= текущей
+        allowed |= self._inherited_stage_tools(dialog_state, self.STAGE_TOOLS_CLASSIC)
+
+        # guards: фильтрация опасных инструментов
+        allowed = self._apply_guards(dialog_state, allowed, data)
+
+        return allowed
+
+    def _inherited_stage_tools(self, dialog_state: str, stage_map: dict[str, set[str]]) -> set[str]:
+        if dialog_state not in self.ORDER:
+            dialog_state = "new"
+        idx = self.ORDER.index(dialog_state)
+
+        out: set[str] = set()
+        for st in self.ORDER[: idx + 1]:
+            out |= stage_map.get(st, set())
+        return out
+
+    def _apply_guards(self, dialog_state: str, allowed: set[str], data: dict) -> set[str]:
+        """
+        Guards по воронке:
+          - Слоты: только если есть office_id + desired_date
+          - Запись: только если есть consent + (name) + phone + email + desired_time
+        """
+        # 1) Слоты не даём, пока не выбран филиал и дата
+        # (это актуально и на remember, и на available_time если пользователь меняет дату/офис)
+        if dialog_state in ("remember", "available_time"):
+            if not self._has_office_and_date(data):
+                allowed.discard("zena_avaliable_time_for_master")
+                allowed.discard("zena_available_time_for_master_list")
+
+        # 2) Запись не даём без пакета данных + выбранного времени
+        if dialog_state == "available_time":
+            if not self._has_contact_bundle(data) or not self._has_desired_time(data):
+                allowed.discard("zena_record_time")
+
+        return allowed
+
+    @staticmethod
+    def _has_office_and_date(data: dict) -> bool:
+        office_id = str(data.get("office_id") or "").strip()
+        desired_date = str(data.get("desired_date") or "").strip()
+        return bool(office_id and desired_date)
+
+    @staticmethod
+    def _has_desired_time(data: dict) -> bool:
+        t = str(data.get("desired_time") or "").strip()
+        return bool(t)
+
+    @staticmethod
+    def _has_contact_bundle(data: dict) -> bool:
+        consent = bool(data.get("consent"))
+        phone = str(data.get("phone") or "").strip()
+        email = str(data.get("email") or "").strip()
+        first = str(data.get("first_name") or "").strip()
+        last = str(data.get("last_name") or "").strip()
+        name_ok = bool(first or last)
+        return bool(consent and name_ok and phone and email)
+
+    # -------------------------
+    # 4007/5007 (оставляем твою текущую логику, но добавляем globals + guards + override)
+    # -------------------------
+    def _allowed_for_4007_5007(self, dialog_state: str, data: dict, base: set[str]) -> set[str]:
+        if dialog_state == "postrecord":
+            return {"zena_recommendations"}
+
+        allowed = set(base)
 
         match dialog_state:
             case "new":
                 allowed.add("zena_record_product_id_list")
-
             case "remember":
                 allowed |= {"zena_remember_product_id_list", "zena_avaliable_time_for_master_list"}
-
             case "available_time":
-                allowed |= {
-                    "zena_remember_product_id_list",
-                    "zena_avaliable_time_for_master_list",
-                    "zena_record_time",
-                }
-
-            case "postrecord":
-                allowed.add("zena_recommendations")
-
+                allowed |= {"zena_remember_product_id_list", "zena_avaliable_time_for_master_list", "zena_record_time"}
             case _:
                 pass
 
-        return allowed
+        # guards
+        if dialog_state in ("remember", "available_time"):
+            if not self._has_office_and_date(data):
+                allowed.discard("zena_avaliable_time_for_master_list")
 
-    def _allowed_for_classic_ports(self, dialog_state: str | None) -> set[str]:
-        # базовый набор
-        allowed = {"zena_faq", "zena_services", "zena_product_search"}
-
-        if dialog_state != "new":
-            allowed.add("zena_remember_product_id")
-
-        if dialog_state not in ("new", "selecting"):
-            allowed |= {"zena_avaliable_time_for_master", "zena_record_time"}
-
-        # ВАЖНО: у тебя тут "обнуление" (оставляем только recommendations)
-        if dialog_state == "postrecord":
-            return {"zena_recommendations"}
+        if dialog_state == "available_time":
+            if not self._has_contact_bundle(data) or not self._has_desired_time(data):
+                allowed.discard("zena_record_time")
 
         return allowed
 
-    def _allowed_for_5020(self, dialog_state: str | None, data: dict) -> set[str]:
-        allowed = {"zena_faq"}
+    # -------------------------
+    # 5020 (Alena) — твоя логика + globals
+    # -------------------------
+    def _allowed_for_5020(self, dialog_state: str, data: dict, base: set[str]) -> set[str]:
+        allowed = set(base)
 
-        phone = (data.get("phone") or "").strip()
+        phone = str(data.get("phone") or "").strip()
         onboarding = data.get("onboarding") or {}
         onboarding_stage = onboarding.get("onboarding_stage")
         onboarding_status = onboarding.get("onboarding_status")
@@ -153,45 +265,191 @@ class ToolSelectorMiddleware(AgentMiddleware):
 
         return allowed
 
+    # -------------------------
+    # Model selection (оставь свой импорт/логику, ниже заглушка)
+    # -------------------------
+    async def _select_model(self, state: dict):
 
-    async def _select_model (self, state: State) -> BaseChatModel:
-        """Выбор модели под конкретную стадию диалога."""
-
-        logger.info("===wrap_model_call===_select_model===")
-
-        data = state.get("data", {}) 
+        data = state.get("data", {}) or {}
         mcp_port = data.get("mcp_port")
-        dialog_state = data.get("dialog_state")
+        dialog_state = (data.get("dialog_state") or "new").strip()
 
-        if mcp_port in [4007, 5007]:
-            model = model_4o if dialog_state in ["new", "available_time"] else model_4o_mini
-            logger.info(f"dialog_state: {dialog_state}")
-            logger.info(f"Выбрана модель: {model}")
-            return model
-        elif mcp_port in [5020]:
-             return model_4o_mini
-        elif mcp_port in [5002]:
-            model = model_4o if dialog_state in ["remember"] else model_4o_mini
-            logger.info(f"dialog_state: {dialog_state}")
-            logger.info(f"Выбрана модель: {model}")
-            return model
-        else:
+        if mcp_port in self.PORTS_4007_5007:
+            return model_4o if dialog_state in ("new", "available_time") else model_4o_mini
+
+        if mcp_port in self.PORT_5020:
             return model_4o_mini
 
+        if mcp_port in self.CLASSIC_PORTS:
+            return model_4o if dialog_state in ("remember",) else model_4o_mini
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], ModelResponse],
-    ) -> ModelResponse:
-        """Middleware для выбора релевантных инструментов и модели."""
+        return model_4o_mini
 
+    # -------------------------
+    # Middleware entry
+    # -------------------------
+    async def awrap_model_call(self, request, handler):
         logger.info("===wrap_model_call===ToolSelectorMiddleware===")
 
         request.tools = await self._select_relevant_tools(request.state, request.tools)
         request.model = await self._select_model(request.state)
-        
+
         return await handler(request)
+
+
+
+# class ToolSelectorMiddleware(AgentMiddleware):
+#     """Middleware для выбора релевантных инструментов по состоянию диалога."""
+
+#     async def _select_relevant_tools(
+#         self,
+#         state: State,
+#         tools: list[StructuredTool],
+#     ) -> list[StructuredTool]:
+
+#         logger.info("===wrap_model_call===_select_relevant_tools===")
+
+#         data = state.get("data", {}) or {}
+#         mcp_port = data.get("mcp_port")
+#         dialog_state = data.get("dialog_state")
+
+#         logger.info(f"dialog_state: {dialog_state}")
+#         logger.info(f"mcp_port: {mcp_port}")
+#         logger.info(f"all_tools: {[t.name for t in tools]}")
+
+#         allowed = self._build_allowed_tools(mcp_port=mcp_port, dialog_state=dialog_state, data=data)
+
+#         filtered = [tool for tool in tools if tool.name in allowed]
+#         logger.info(f"tools: {[t.name for t in filtered]}")
+#         return filtered
+
+#     # -------------------------
+#     # Builders
+#     # -------------------------
+
+#     def _build_allowed_tools(self, *, mcp_port: int | None, dialog_state: str | None, data: dict) -> set[str]:
+#         # дефолтный набор, если порт неизвестен
+#         if mcp_port is None:
+#             return {"zena_faq"}
+
+#         if mcp_port in {4007, 5007}:
+#             return self._allowed_for_4007_5007(dialog_state)
+
+#         if mcp_port in {4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006}:
+#             return self._allowed_for_classic_ports(dialog_state)
+
+#         if mcp_port == 5020:
+#             return self._allowed_for_5020(dialog_state, data)
+
+#         # неизвестный порт
+#         return {"zena_faq"}
+
+#     def _allowed_for_4007_5007(self, dialog_state: str | None) -> set[str]:
+#         allowed = {"zena_faq", "zena_services"}
+
+#         match dialog_state:
+#             case "new":
+#                 allowed.add("zena_record_product_id_list")
+
+#             case "remember":
+#                 allowed |= {"zena_remember_product_id_list", "zena_avaliable_time_for_master_list"}
+
+#             case "available_time":
+#                 allowed |= {
+#                     "zena_remember_product_id_list",
+#                     "zena_avaliable_time_for_master_list",
+#                     "zena_record_time",
+#                 }
+
+#             case "postrecord":
+#                 allowed.add("zena_recommendations")
+
+#             case _:
+#                 pass
+
+#         return allowed
+
+#     def _allowed_for_classic_ports(self, dialog_state: str | None) -> set[str]:
+#         # базовый набор
+#         allowed = {"zena_faq", "zena_services", "zena_product_search"}
+
+#         if dialog_state != "new":
+#             allowed.add("zena_remember_product_id")
+
+#         if dialog_state not in ("new", "selecting"):
+#             allowed |= {"zena_avaliable_time_for_master", "zena_record_time"}
+
+#         # ВАЖНО: у тебя тут "обнуление" (оставляем только recommendations)
+#         if dialog_state == "postrecord":
+#             return {"zena_recommendations"}
+
+#         return allowed
+
+#     def _allowed_for_5020(self, dialog_state: str | None, data: dict) -> set[str]:
+#         allowed = {"zena_faq"}
+
+#         phone = (data.get("phone") or "").strip()
+#         onboarding = data.get("onboarding") or {}
+#         onboarding_stage = onboarding.get("onboarding_stage")
+#         onboarding_status = onboarding.get("onboarding_status")
+
+#         # обычный режим диалога
+#         if (onboarding_status is None or onboarding_status is True) and phone:
+#             allowed.add("zena_get_client_statistics")
+
+#             if dialog_state == "new":
+#                 allowed.add("zena_get_client_lessons")
+#             elif dialog_state == "selecting":
+#                 allowed.add("zena_remember_lesson_id")
+#             elif dialog_state == "remember":
+#                 allowed.add("zena_update_client_lesson")
+
+#         # режим опроса
+#         else:
+#             if isinstance(onboarding_stage, int) and onboarding_stage >= 5:
+#                 allowed.add("zena_update_client_info")
+
+#         return allowed
+
+
+#     async def _select_model (self, state: State) -> BaseChatModel:
+#         """Выбор модели под конкретную стадию диалога."""
+
+#         logger.info("===wrap_model_call===_select_model===")
+
+#         data = state.get("data", {}) 
+#         mcp_port = data.get("mcp_port")
+#         dialog_state = data.get("dialog_state")
+
+#         if mcp_port in [4007, 5007]:
+#             model = model_4o if dialog_state in ["new", "available_time"] else model_4o_mini
+#             logger.info(f"dialog_state: {dialog_state}")
+#             logger.info(f"Выбрана модель: {model}")
+#             return model
+#         elif mcp_port in [5020]:
+#              return model_4o_mini
+#         elif mcp_port in [5002]:
+#             model = model_4o if dialog_state in ["remember"] else model_4o_mini
+#             logger.info(f"dialog_state: {dialog_state}")
+#             logger.info(f"Выбрана модель: {model}")
+#             return model
+#         else:
+#             return model_4o_mini
+
+
+#     async def awrap_model_call(
+#         self,
+#         request: ModelRequest,
+#         handler: Callable[[ModelRequest], ModelResponse],
+#     ) -> ModelResponse:
+#         """Middleware для выбора релевантных инструментов и модели."""
+
+#         logger.info("===wrap_model_call===ToolSelectorMiddleware===")
+
+#         request.tools = await self._select_relevant_tools(request.state, request.tools)
+#         request.model = await self._select_model(request.state)
+        
+#         return await handler(request)
 
 
 

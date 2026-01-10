@@ -118,6 +118,9 @@ class GetDatabaseMiddleware(AgentMiddleware):
         "item_selected",
         "available_time",
         "available_sequences",
+        "office_id",
+        "desired_date",
+        "desired_time",
     )
 
     @hook_config(can_jump_to=["end"])
