@@ -1,7 +1,4 @@
-deactivate
-cd /home/copilot_superuser/petrunin/zena/langgraph
-source .venv/bin/activate
-python -c "import sys; print(sys.executable)"
+
 
 # Путь к интерпритатору.
 /home/copilot_superuser/petrunin/zena/langgraph/.venv/bin/python
