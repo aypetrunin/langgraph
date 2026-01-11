@@ -15,9 +15,6 @@ services:
 
   langgraph-postgres:
     image: pgvector/pgvector:pg16
-    # В DEV можно публиковать наружу для удобства дебага
-    ports:
-      - "${LANGGRAPH_PG_PORT}:5432"
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
@@ -43,8 +40,10 @@ services:
       context: .
       dockerfile: Dockerfile
     image: "zena_langgraph_api:${ENV}"
-    ports:
-      - "${LANGGRAPH_API_PORT}:8000"
+    expose:
+      - "8000"
+    # ports:  # <-- НЕ публикуем напрямую, чтобы 18123 занял nginx
+    #   - "${LANGGRAPH_API_PORT}:8000"
     depends_on:
       langgraph-redis:
         condition: service_healthy
@@ -62,5 +61,16 @@ services:
       start_period: 10s
     env_file:
       - ../deploy/dev.env
+    networks:
+      - zena-network
+
+  cors_proxy:
+    image: nginx:alpine
+    depends_on:
+      - langgraph-api
+    ports:
+      - "${LANGGRAPH_API_PORT}:8080"   # 18123:8080
+    volumes:
+      - ./nginx-dev.conf:/etc/nginx/conf.d/default.conf
     networks:
       - zena-network
