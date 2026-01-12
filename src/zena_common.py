@@ -11,7 +11,9 @@ from functools import wraps
 from pathlib import Path
 from dotenv import load_dotenv
 from typing_extensions import Any, Awaitable, Callable, TypeVar
+from typing import Optional
 
+from langgraph.store.base import Item
 from langchain.chat_models import init_chat_model
 
 
@@ -68,6 +70,26 @@ model_4o = init_chat_model(
         timeout=60.0
     ),
 )
+
+
+def format_memories(memories: Optional[list[Item]]) -> str:
+    """Format the user's memories."""
+    if not memories:
+        return ""
+    # Note Bene: You can format better than this....
+    formatted_memories = "\n".join(
+        f"{str(m.value)}\tLast updated: {m.updated_at}" for m in memories
+    )
+    return f"""
+
+## Memories
+
+You have noted the following memorable events from previous interactions with the user.
+<memories>
+{formatted_memories}
+</memories>
+"""
+
 
 
 # -------------------- Декоратор Retry helper --------------------

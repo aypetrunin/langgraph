@@ -11,6 +11,7 @@
         "agent_zena_alena": "src.zena_create_graph:graph_alena",
         "memory_graph": "src.memory_graph.graph:graph"
     },
+    "env": "../deploy/dev.env",
     "store": {
         "ttl": {"default_ttl": 5, "refresh_on_read": false, "sweep_interval_minutes": 1},
         "index": {
@@ -18,6 +19,5 @@
             "embed": "openai:text-embedding-3-small"
         }
     },
-    "env": "../deploy/dev.env",
     "image_distro": "wolfi"
 }

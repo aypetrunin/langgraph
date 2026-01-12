@@ -31,6 +31,8 @@ class ProcessorState(State):
 
 logger = logging.getLogger("memory")
 
+from ..zena_common import model_4o_mini
+
 
 @functools.lru_cache(maxsize=100)
 def get_store_manager(function_name: str):
@@ -46,7 +48,8 @@ def get_store_manager(function_name: str):
         kwargs["instructions"] = memory_config.system_prompt
 
     return create_memory_store_manager(
-        configurable.model,
+        model_4o_mini,
+        # configurable.model,
         namespace=("memories", "{user_id}", function_name),
         **kwargs,
     )
@@ -61,7 +64,8 @@ async def process_memory_type(state: ProcessorState) -> None:
         {"messages": state["messages"], "max_steps": configurable.max_extraction_steps},
         config={
             "configurable": {
-                "model": configurable.model,
+                # "model": configurable.model,
+                "model": model_4o_mini,
                 "user_id": configurable.user_id,
             }
         },
@@ -71,10 +75,13 @@ async def process_memory_type(state: ProcessorState) -> None:
 @entrypoint(config_schema=configuration.Configuration)
 async def graph(state: State) -> None:
     """Iterate over all memory types in the configuration.
+       Пройти по всем типам памяти в конфигурации
 
     It will route each memory type from configuration to the corresponding memory update node.
+    Он будет направлять каждый тип памяти из конфигурации в соответствующий узел обновления памяти.
 
     The memory update nodes will be executed in parallel.
+    Узлы обновления памяти будут выполняться параллельно.
     """
     if not state["messages"]:
         raise ValueError("No messages provided")

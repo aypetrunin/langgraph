@@ -7,6 +7,7 @@ from typing import Any, Literal
 from langgraph.config import get_config
 from typing_extensions import Annotated
 
+from ..zena_common import openai_model_4o_mini
 
 @dataclass(kw_only=True)
 class MemoryConfig:
@@ -44,7 +45,8 @@ class Configuration:
     user_id: str = "default"
     """The ID of the user to remember in the conversation."""
     model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
-        default="openai:gpt-4o-mini",
+        # default="openai:gpt-4o-mini",
+        default=openai_model_4o_mini,
         metadata={
             "description": "The name of the language model to use for the agent. "
             "Should be in the form: provider/model-name."
