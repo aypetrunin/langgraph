@@ -7,7 +7,7 @@ python -c "import sys; print(sys.executable)"
 /home/copilot_superuser/petrunin/zena/langgraph/.venv/bin/python
 
 # Запуск
-uv run langgraph dev
+uv run langgraph dev --port 2025
 
 # 1.Фиксация версии Python для проекта
 # переходим в рабочий каталог и выполняем команду
