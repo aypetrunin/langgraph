@@ -91,7 +91,7 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
             # personalized_prompt,
             ToolSelectorMiddleware(),
             # SaveResultToolsMiddleware(),
-            TrimMessages(),
+            # TrimMessages(),
             ToolMonitoringMiddleware(),
             GetCountToken(),
             GetToolArgs(),
@@ -99,17 +99,17 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
             ResetData(),
             SaveResponceAgent(),
             
-            ContextEditingMiddleware(
-                edits=[
-                    ClearToolUsesEdit(
-                        trigger=2000,
-                        keep=2,
-                        clear_tool_inputs=True,
-                        exclude_tools=[],
-                        placeholder="[cleared]",
-                    ),
-                ],
-            ),
+            # ContextEditingMiddleware(
+            #     edits=[
+            #         ClearToolUsesEdit(
+            #             trigger=2000,
+            #             keep=2,
+            #             clear_tool_inputs=True,
+            #             exclude_tools=[],
+            #             placeholder="[cleared]",
+            #         ),
+            #     ],
+            # ),
             ModelFallbackMiddleware(
                 model_4o_mini,
                 model_4o_mini_reserv,

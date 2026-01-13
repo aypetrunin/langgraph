@@ -142,6 +142,7 @@ def _content_to_text(content: str | list[Any] | None) -> str:
     где оно было сформировано Langgraph Studio в закладке Chat или Graph.
     Особенность Langgraph Studio.
     """
+    logger.info("_content_to_text")
     if isinstance(content, str):
         return content
     if isinstance(content, list) and content:

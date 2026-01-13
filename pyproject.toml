@@ -37,7 +37,7 @@ dependencies = [
     "langsmith>=0.4.38",
     "langchain>=1.0.5",
     "langchain-mcp-adapters>=0.1.12",
-    "langgraph-api==0.6.15",
+    "langgraph-api==0.6.35",
     "langgraph-checkpoint-postgres>=3.0.1",
     "psycopg[binary,pool]>=3.3.0",
 ]

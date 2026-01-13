@@ -16,7 +16,9 @@ PostProcessor = Callable[[ToolMessage, ToolCallRequest], Awaitable[Any]]
 
 
 def _parse_tool_content(result: ToolMessage) -> Any:
+    logger.info("_parse_tool_content")
     raw_content = _content_to_text(getattr(result, "content", ""))
+    logger.info(f"raw_content: {raw_content}")
     if not raw_content or not raw_content.strip():
         return ""
     try:
@@ -192,15 +194,22 @@ async def pp_product_remember(result: ToolMessage, request: ToolCallRequest) -> 
     items_out: list[dict] = []
 
     def on_ok(data: dict, tools_result: list, request: ToolCallRequest) -> None:
+ 
+        if not tools_result.get("success"):
+            return tools_result.get("message")
+        
         nonlocal items_out
-        items_out = [parse_item(x) for x in tools_result if isinstance(x, dict)]
+        items_out = [parse_item(x) for x in tools_result.get("products") if isinstance(x, dict)]
+        
         if not items_out:
             return
+        
         data["item_selected"] = items_out
         data["dialog_state"] = "remember"
         logger.info(f"item_selected: {items_out}")
-
-    await zena_default(request=request, result=result, expected_type=list, on_ok=on_ok)
+    
+    logger.info("pp_product_remember")
+    await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
     return items_out or None
 
 

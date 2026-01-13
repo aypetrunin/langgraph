@@ -276,12 +276,12 @@ class ToolSelectorMiddleware(AgentMiddleware):
 
         if mcp_port in self.PORTS_4007_5007:
             return model_4o if dialog_state in ("new", "available_time") else model_4o_mini
-
+ 
         if mcp_port in self.PORT_5020:
             return model_4o_mini
 
         if mcp_port in self.CLASSIC_PORTS:
-            return model_4o if dialog_state in ("remember",) else model_4o_mini
+            return model_4o if dialog_state in ("remember", "postrecord") else model_4o_mini
 
         return model_4o_mini
 
