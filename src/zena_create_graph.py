@@ -33,6 +33,8 @@ MCP_PORT_ANISA = os.getenv("MCP_PORT_ANISA") # 5005 / 15005
 MCP_PORT_ANNITTA = os.getenv("MCP_PORT_ANNITTA") # 5006 / 15006
 MCP_PORT_ANASTASIA = os.getenv("MCP_PORT_ANASTASIA") # 5007 / 15007
 MCP_PORT_ALENA = os.getenv("MCP_PORT_ALENA") # 5020 / 15020
+MCP_PORT_VALENTINA = os.getenv("MCP_PORT_VALENTINA") # 5021 / 15021
+
 
 graph_alisa = asyncio.run(create_agent_graph(MCP_PORT_ALISA))
 graph_sofia = asyncio.run(create_agent_graph(MCP_PORT_SOFIA))
@@ -40,3 +42,4 @@ graph_anisa = asyncio.run(create_agent_graph(MCP_PORT_ANISA))
 graph_annitta = asyncio.run(create_agent_graph(MCP_PORT_ANNITTA))
 graph_anastasia = asyncio.run(create_agent_graph(MCP_PORT_ANASTASIA))
 graph_alena = asyncio.run(create_agent_graph(MCP_PORT_ALENA))
+graph_valentina = asyncio.run(create_agent_graph(MCP_PORT_VALENTINA))
