@@ -36,7 +36,7 @@ class DynamicSystemPrompt(AgentMiddleware):
 
         async with aiofiles.open(tpl_path, encoding="utf-8") as f:
             source = await f.read()
-        logger.info(f"request.state: {request.state}\n")
+        # logger.info(f"request.state: {request.state}\n")
         data = request.state.get("data", {})
         system_prompt = Template(source).render(**data)
         data["prompt_system"] = "" # system_prompt
