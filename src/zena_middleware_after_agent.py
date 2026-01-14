@@ -46,7 +46,7 @@ class SaveResponceAgent(AgentMiddleware):
                 "template_prompt_system": data.get('template_prompt_system', ''),
             }
 
-            logger.info(f"payload: {payload}")
+            # logger.info(f"payload: {payload}")
 
             responce = await sent_message_to_history(**payload)
             
