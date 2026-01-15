@@ -87,14 +87,16 @@ class ToolSelectorMiddleware(AgentMiddleware):
             "zena_avaliable_time_for_master",
             "zena_available_time_for_master_list",
         },
-        "postrecord": {"zena_recommendations"},
+        "postrecord": {
+            "zena_recommendations"
+        },
     }
 
     # postrecord override: жёстко только recommendations
     POSTRECORD_OVERRIDE: set[str] = {"zena_recommendations"}
 
     # ---------- ports ----------
-    CLASSIC_PORTS = {4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006}
+    CLASSIC_PORTS = {4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006, 5021, 4021}
     PORTS_4007_5007 = {4007, 5007}
     PORT_5020 = {5020}
 
