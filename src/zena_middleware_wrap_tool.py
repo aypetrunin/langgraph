@@ -188,6 +188,16 @@ async def pp_remember_desired_time(result: ToolMessage, request: ToolCallRequest
     return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
 
 
+async def pp_remember_master(result: ToolMessage, request: ToolCallRequest) -> Any:
+    def on_ok(data: dict, tools_result: dict, request: ToolCallRequest) -> None:
+        if tools_result.get("success") and tools_result.get("master_id"):
+            data["desired_master"] = {
+                'master_id': str(tools_result["master_id"]),
+                'master_name': str(tools_result["master_name"])
+            }
+
+    return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
+
 
 async def pp_product_remember(result: ToolMessage, request: ToolCallRequest) -> Any:
     """Возвращает нормализованные items (item_selected)."""
@@ -252,6 +262,7 @@ TOOL_POSTPROCESSORS_DEFAULT: dict[str, PostProcessor] = {
     "zena_remember_product_id": pp_product_remember,
     # NEW: remember user inputs
     "zena_remember_office": pp_remember_office,
+    "zena_remember_master":pp_remember_master,
     "zena_remember_desired_date": pp_remember_desired_date,
     "zena_remember_desired_time": pp_remember_desired_time,
 }
@@ -264,6 +275,7 @@ TOOL_POSTPROCESSORS_5007: dict[str, PostProcessor] = {
     "zena_remember_product_id_list": pp_product_remember,
     # NEW: remember user inputs
     "zena_remember_office": pp_remember_office,
+    "zena_remember_master":pp_remember_master,
     "zena_remember_desired_date": pp_remember_desired_date,
     "zena_remember_desired_time": pp_remember_desired_time,
 }

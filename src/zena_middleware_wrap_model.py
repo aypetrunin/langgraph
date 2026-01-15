@@ -65,6 +65,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
         "zena_services",
         # remember tools (всегда доступны, т.к. клиент может назвать их где угодно)
         "zena_remember_office",
+        "zena_remember_master",
         "zena_remember_desired_date",
         "zena_remember_desired_time",
     }

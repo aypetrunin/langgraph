@@ -8,6 +8,7 @@ from typing import Any
 
 from .zena_common import logger, retry_async
 
+
 TIMEOUT_SECONDS = 120.0
 
 
@@ -119,65 +120,55 @@ def get_stage_onboarding(payload: dict) -> int:
 
 
 @retry_async()
-async def fetch_masters_info(
-    channel_id: int | None = 0,
-) -> dict[str, Any]:
-    """Асинхронная запись пользователя на услугу через API с предварительной проверкой слотов."""
+async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]:
+    """Получение списка мастеров по офисам для заданного channel_id."""
 
     logger.info("===get_masters===")
     logger.info("Получение списка мастеров channel_id=%s", channel_id)
 
     url = "https://httpservice.ai2b.pro/appointments/yclients/staff/actual"
 
-    payload = {
-        "channel_id": channel_id,
+    OFFICE_IDS: dict[int, list[int]] = {
+        1: [1, 19],
     }
+
+    if isinstance(channel_id, int) and channel_id in OFFICE_IDS:
+        office_list = OFFICE_IDS[channel_id]
+    else:
+        office_list = [channel_id] if isinstance(channel_id, int) and channel_id > 0 else []
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-            logger.info(
-                "Отправка запроса на на получение списка мастеров %s with payload=%s", url, payload
-            )
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            resp_json = response.json()
+            masters_list: list[dict[str, Any]] = []
 
-            result = {
-                'success': resp_json['success'],
-                'masters': [
-                    {
-                        'master_id': staff['id'],
-                        'master_name': staff['name']
-                    }
-                    for staff in resp_json['staff']
-                ]
-            }
+            for office_id in office_list:
+                payload = {"channel_id": office_id}
 
-            # # 🔥 Обработка бага API (этап записи)
-            # if (
-            #     isinstance(resp_json, dict)
-            #     and resp_json.get("success") is False
-            #     and resp_json.get("error") == "Неожиданный код статуса: 400"
-            # ):
-            #     logger.info(
-            #         "Обнаружена ошибка API при бронировании (400). Бронирование считается успешным. "
-            #         "Payload=%s, Response=%s",
-            #         payload,
-            #         resp_json,
-            #     )
-            #     return {
-            #         "success": True,
-            #         "info": f"Запись к master_id={staff_id} на время {requested_datetime} сделана",
-            #     }
+                logger.info(
+                    "Отправка запроса на получение списка мастеров %s with payload=%s",
+                    url,
+                    payload,
+                )
 
-            # logger.info(
-            #     "Бронирование успешно выполнено для user_id=%s, service_id=%s", user_id, product_id
-            # )
-            return result
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                resp_json = response.json()
+
+                result = {
+                    "office_id": office_id,
+                    "masters": [
+                        {"master_id": s["id"], "master_name": s["name"]}
+                        for s in resp_json.get("staff", [])
+                    ],
+                }
+
+                masters_list.append(result)
+
+            return masters_list
 
     except httpx.TimeoutException as e:
         logger.error("Таймаут при чтении мастеров channel_id=%s: %s", channel_id, e)
-        raise  # повторная попытка через tenacity
+        raise  # повторная попытка через retry_async/tenacity
 
     except httpx.HTTPStatusError as e:
         logger.error(
@@ -186,13 +177,14 @@ async def fetch_masters_info(
             channel_id,
             e,
         )
-        return {"success": False, "error": f"HTTP ошибка: {e.response.status_code}"}
+        return [{"success": False, "error": f"HTTP ошибка: {e.response.status_code}"}]
 
     except Exception as e:
         logger.exception(
-            "Неожиданная ошибка при чтении мастеров service_id=%s: %s", channel_id, e
+            "Неожиданная ошибка при чтении мастеров channel_id=%s: %s", channel_id, e
         )
-        return {"success": False, "error": "Неизвестная ошибка при чтении мастеров"}
+        return [{"success": False, "error": "Неизвестная ошибка при чтении мастеров"}]
+
 
 
 async def main():
@@ -201,7 +193,7 @@ async def main():
     #     phone=phone,
     # )
 
-    response = await fetch_masters_info(channel_id = 21)
+    response = await fetch_masters_info(channel_id = 1)
     print(response)
 
 
