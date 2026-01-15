@@ -121,6 +121,7 @@ class GetDatabaseMiddleware(AgentMiddleware):
         "office_id",
         "desired_date",
         "desired_time",
+        "desired_master",
     )
 
     @hook_config(can_jump_to=["end"])
