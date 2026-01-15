@@ -191,10 +191,12 @@ async def pp_remember_desired_time(result: ToolMessage, request: ToolCallRequest
 async def pp_remember_master(result: ToolMessage, request: ToolCallRequest) -> Any:
     def on_ok(data: dict, tools_result: dict, request: ToolCallRequest) -> None:
         if tools_result.get("success") and tools_result.get("master_id"):
-            data["desired_master"] = {
+            data["desired_master"] = [{
                 'master_id': str(tools_result["master_id"]),
                 'master_name': str(tools_result["master_name"])
-            }
+            }]
+            logger.info("===pp_remember_master===")
+            logger.info(f"data['desired_master']: {data['desired_master']}")
 
     return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
 
