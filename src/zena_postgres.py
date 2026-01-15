@@ -10,7 +10,7 @@ from pathlib import Path
 from typing_extensions import Any, Dict, List, Iterable
 
 from .zena_common import logger, retry_async
-from .zena_requests import fetch_personal_info
+from .zena_requests import fetch_personal_info, fetch_masters_info
 
 if not os.getenv("IS_DOCKER"):
     ROOT = Path(__file__).resolve().parents[3]
@@ -59,6 +59,7 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
         products_full = await fetch_services(conn, channel_id)
         probny = await fetch_probny(conn, channel_id)
         first_dialog = await fetch_is_first_dialog(conn, user_companychat)
+        masters_info = await fetch_masters_info(channel_id)
         # dialog_state = await fetch_dialog_state(conn, session_id)
         # product_list = await fetch_product_list(conn, session_id)
         # product_id = await fetch_product_id(conn, session_id)
@@ -79,6 +80,7 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
             # "product_list": product_list,
             # "product_id": product_id,
             "user_info": user_info,
+            "masters_info": masters_info,
             # "dialog": dialog,
             # "query": query,
             # "available_time": available_time,

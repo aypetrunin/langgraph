@@ -2,10 +2,13 @@
 
 import aiohttp
 import asyncio
+import httpx
 
 from typing import Any
 
 from .zena_common import logger, retry_async
+
+TIMEOUT_SECONDS = 120.0
 
 
 @retry_async()
@@ -115,11 +118,90 @@ def get_stage_onboarding(payload: dict) -> int:
     return 4  # Fallback
 
 
+@retry_async()
+async def fetch_masters_info(
+    channel_id: int | None = 0,
+) -> dict[str, Any]:
+    """Асинхронная запись пользователя на услугу через API с предварительной проверкой слотов."""
+
+    logger.info("===get_masters===")
+    logger.info("Получение списка мастеров channel_id=%s", channel_id)
+
+    url = "https://httpservice.ai2b.pro/appointments/yclients/staff/actual"
+
+    payload = {
+        "channel_id": channel_id,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+            logger.info(
+                "Отправка запроса на на получение списка мастеров %s with payload=%s", url, payload
+            )
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            resp_json = response.json()
+
+            result = {
+                'success': resp_json['success'],
+                'masters': [
+                    {
+                        'master_id': staff['id'],
+                        'master_name': staff['name']
+                    }
+                    for staff in resp_json['staff']
+                ]
+            }
+
+            # # 🔥 Обработка бага API (этап записи)
+            # if (
+            #     isinstance(resp_json, dict)
+            #     and resp_json.get("success") is False
+            #     and resp_json.get("error") == "Неожиданный код статуса: 400"
+            # ):
+            #     logger.info(
+            #         "Обнаружена ошибка API при бронировании (400). Бронирование считается успешным. "
+            #         "Payload=%s, Response=%s",
+            #         payload,
+            #         resp_json,
+            #     )
+            #     return {
+            #         "success": True,
+            #         "info": f"Запись к master_id={staff_id} на время {requested_datetime} сделана",
+            #     }
+
+            # logger.info(
+            #     "Бронирование успешно выполнено для user_id=%s, service_id=%s", user_id, product_id
+            # )
+            return result
+
+    except httpx.TimeoutException as e:
+        logger.error("Таймаут при чтении мастеров channel_id=%s: %s", channel_id, e)
+        raise  # повторная попытка через tenacity
+
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            "Ошибка HTTP %d при чтении мастеров channel_id=%s: %s",
+            e.response.status_code,
+            channel_id,
+            e,
+        )
+        return {"success": False, "error": f"HTTP ошибка: {e.response.status_code}"}
+
+    except Exception as e:
+        logger.exception(
+            "Неожиданная ошибка при чтении мастеров service_id=%s: %s", channel_id, e
+        )
+        return {"success": False, "error": "Неизвестная ошибка при чтении мастеров"}
+
+
 async def main():
     phone = "799967382561"
-    response = await fetch_crm_go_client_info(
-        phone=phone,
-    )
+    # response = await fetch_crm_go_client_info(
+    #     phone=phone,
+    # )
+
+    response = await fetch_masters_info(channel_id = 21)
     print(response)
 
 
