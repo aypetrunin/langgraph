@@ -40,6 +40,8 @@ dependencies = [
     "langgraph-api==0.6.35",
     "langgraph-checkpoint-postgres>=3.0.1",
     "psycopg[binary,pool]>=3.3.0",
+    "google-auth>=2.47.0",
+    "google-api-python-client>=2.188.0",
 ]
 
 [dependency-groups]

@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 
 import aiofiles
+import os
 
 from pathlib import Path
 from typing import Callable
@@ -21,6 +22,7 @@ from langchain.agents.middleware import (
 
 from .zena_common import logger, model_4o, model_4o_mini
 from .zena_state import State, Context
+from .zena_google_doc import GoogleDocTemplateReader
 
 
 class DynamicSystemPrompt(AgentMiddleware):
@@ -30,19 +32,66 @@ class DynamicSystemPrompt(AgentMiddleware):
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse:
         logger.info("==awrap_model_call==DynamicSystemPrompt==")
-        
-        tpl_system_prompt = request.state["data"]["template_prompt_system"]
-        tpl_path = Path(__file__).parent / "template" / tpl_system_prompt
 
-        async with aiofiles.open(tpl_path, encoding="utf-8") as f:
-            source = await f.read()
-        logger.info(f"request.state: {request.state}\n")
         data = request.state.get("data", {})
+        env = os.getenv("ENV", "prod").lower()
+
+        # --- DEV: берём шаблон из Google Docs ---
+        if env == "dev":
+            # В dev допускаем, что template_prompt_system может быть URL,
+            # а также поддерживаем отдельный ключ template_prompt_system_url
+            doc_url = data.get("template_prompt_system_url") or data.get("template_prompt_system")
+            if not doc_url:
+                raise RuntimeError("Missing template_prompt_system_url (or template_prompt_system as URL) in dev")
+
+            reader = await GoogleDocTemplateReader.create(
+                doc_url=doc_url,
+                cache_ttl_sec=60,        # держим текст 60с
+                meta_check_ttl_sec=10,   # каждые 10с проверяем изменения (etag/modifiedTime)
+            )
+            source = await reader.read_text()
+
+        # --- PROD: берём шаблон из файла ---
+        else:
+            tpl_system_prompt = data["template_prompt_system"]  # имя файла (например: "system_prompt.j2")
+            tpl_path = Path(__file__).parent / "template" / tpl_system_prompt
+
+            async with aiofiles.open(tpl_path, encoding="utf-8") as f:
+                source = await f.read()
+
+        logger.info(f"request.state: {request.state}\n")
+
         system_prompt = Template(source).render(**data)
-        data["prompt_system"] = "" # system_prompt
-        logger.info(f"dialog_state:{data['dialog_state']}\n")
-        logger.info(f"system_prompt:\n{system_prompt[:]}\n")
+
+        # Важно: не затирать, а сохранять отрендеренный prompt
+        data["prompt_system"] = system_prompt
+
+        logger.info(f"dialog_state:{data.get('dialog_state')}\n")
+        logger.info(f"system_prompt:\n{system_prompt}\n")
+
         return await handler(request.override(system_prompt=system_prompt))
+
+
+# class DynamicSystemPrompt(AgentMiddleware):
+#     async def awrap_model_call(
+#         self,
+#         request: ModelRequest,
+#         handler: Callable[[ModelRequest], ModelResponse],
+#     ) -> ModelResponse:
+#         logger.info("==awrap_model_call==DynamicSystemPrompt==")
+        
+#         tpl_system_prompt = request.state["data"]["template_prompt_system"]
+#         tpl_path = Path(__file__).parent / "template" / tpl_system_prompt
+
+#         async with aiofiles.open(tpl_path, encoding="utf-8") as f:
+#             source = await f.read()
+#         logger.info(f"request.state: {request.state}\n")
+#         data = request.state.get("data", {})
+#         system_prompt = Template(source).render(**data)
+#         data["prompt_system"] = "" # system_prompt
+#         logger.info(f"dialog_state:{data['dialog_state']}\n")
+#         logger.info(f"system_prompt:\n{system_prompt[:]}\n")
+#         return await handler(request.override(system_prompt=system_prompt))
 
 
 # tool_selector_middleware.py
