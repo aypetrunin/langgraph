@@ -82,23 +82,15 @@ def _build_drive_service(sa_file: str):
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
-
 @dataclass
 class _CacheEntry:
     text: str
-    fetched_at: float           # когда скачали text
-    checked_at: float           # когда последний раз проверяли метаданные
-    etag: Optional[str]
+    fetched_at: float
+    checked_at: float
     modified_time: Optional[str]
 
 
 class GoogleDocTemplateReader:
-    """
-    Читает Google Doc по URL и возвращает его текст (export text/plain).
-    С кешированием: TTL + проверка изменения файла по etag/modifiedTime.
-    """
-
-    # общий кеш на процесс (на все инстансы), ключ = doc_id
     _CACHE: dict[str, _CacheEntry] = {}
     _LOCKS: dict[str, asyncio.Lock] = {}
 
@@ -106,20 +98,14 @@ class GoogleDocTemplateReader:
         self,
         doc_url: str,
         service_account_file: Optional[str] = None,
-        cache_ttl_sec: int = 60,          # сколько держим текст без перекачки
-        meta_check_ttl_sec: int = 10,     # как часто проверять modifiedTime/etag
+        cache_ttl_sec: int = 60,
+        meta_check_ttl_sec: int = 10,
     ) -> None:
         self.doc_url = doc_url
         self.service_account_file = service_account_file
         self.cache_ttl_sec = cache_ttl_sec
         self.meta_check_ttl_sec = meta_check_ttl_sec
         self._drive = None
-
-    @retry_async()
-    async def _init_client(self) -> None:
-        if not self.service_account_file:
-            self.service_account_file = get_service_account_file()
-        self._drive = await asyncio.to_thread(_build_drive_service, self.service_account_file)
 
     def _get_lock(self, key: str) -> asyncio.Lock:
         lock = self._LOCKS.get(key)
@@ -128,22 +114,25 @@ class GoogleDocTemplateReader:
             self._LOCKS[key] = lock
         return lock
 
-    async def _get_doc_meta(self, doc_id: str) -> tuple[Optional[str], Optional[str]]:
-        """
-        Возвращает (etag, modifiedTime) из Drive.
-        """
+    @retry_async()
+    async def _init_client(self) -> None:
+        if not self.service_account_file:
+            self.service_account_file = get_service_account_file()
+        self._drive = await asyncio.to_thread(_build_drive_service, self.service_account_file)
+
+    async def _get_modified_time(self, doc_id: str) -> Optional[str]:
         if not self._drive:
             await self._init_client()
 
         def _get() -> dict:
             return self._drive.files().get(
                 fileId=doc_id,
-                fields="etag,modifiedTime",
-                supportsAllDrives=True,  # на всякий случай (если вдруг shared drive)
+                fields="modifiedTime",
+                supportsAllDrives=True,
             ).execute()
 
         meta = await asyncio.to_thread(_get)
-        return meta.get("etag"), meta.get("modifiedTime")
+        return meta.get("modifiedTime")
 
     async def _export_text(self, doc_id: str) -> str:
         if not self._drive:
@@ -163,86 +152,39 @@ class GoogleDocTemplateReader:
         doc_id = extract_google_doc_id(self.doc_url)
         now = time.time()
 
-        lock = self._get_lock(doc_id)
-        async with lock:
+        async with self._get_lock(doc_id):
             entry = self._CACHE.get(doc_id)
 
-            # 1) Если кеша нет — качаем сразу
+            # нет кеша — качаем
             if not entry:
                 text = await self._export_text(doc_id)
-                etag, mtime = await self._get_doc_meta(doc_id)
-                self._CACHE[doc_id] = _CacheEntry(
-                    text=text,
-                    fetched_at=now,
-                    checked_at=now,
-                    etag=etag,
-                    modified_time=mtime,
-                )
+                mtime = await self._get_modified_time(doc_id)
+                self._CACHE[doc_id] = _CacheEntry(text=text, fetched_at=now, checked_at=now, modified_time=mtime)
                 return text
 
-            # 2) Если TTL текста ещё жив — обычно возвращаем кеш,
-            #    но периодически проверяем метаданные (чтобы ловить изменения раньше TTL)
             text_age = now - entry.fetched_at
             meta_age = now - entry.checked_at
 
-            # если давно не проверяли мету — проверим
+            # периодически проверяем modifiedTime
             if meta_age >= self.meta_check_ttl_sec:
                 try:
-                    etag, mtime = await self._get_doc_meta(doc_id)
+                    mtime = await self._get_modified_time(doc_id)
                     entry.checked_at = now
 
-                    # если файл изменился — обновляем текст сразу
-                    if (etag and entry.etag and etag != entry.etag) or (
-                        mtime and entry.modified_time and mtime != entry.modified_time
-                    ):
+                    if mtime and entry.modified_time and mtime != entry.modified_time:
                         text = await self._export_text(doc_id)
-                        self._CACHE[doc_id] = _CacheEntry(
-                            text=text,
-                            fetched_at=now,
-                            checked_at=now,
-                            etag=etag,
-                            modified_time=mtime,
-                        )
+                        self._CACHE[doc_id] = _CacheEntry(text=text, fetched_at=now, checked_at=now, modified_time=mtime)
                         return text
 
-                    # если мета не говорит об изменениях — просто обновим мету в кеше
-                    entry.etag = etag or entry.etag
                     entry.modified_time = mtime or entry.modified_time
-
                 except Exception as e:
-                    # если мету не смогли проверить — деградируем:
-                    # при истёкшем TTL всё равно перекачаем, иначе отдадим кеш
                     logger.warning(f"Metadata check failed for doc {doc_id}: {e}")
 
-            # 3) Если TTL истёк — перекачаем
+            # TTL текста истёк — обновим
             if text_age >= self.cache_ttl_sec:
                 text = await self._export_text(doc_id)
-                etag, mtime = await self._get_doc_meta(doc_id)
-                self._CACHE[doc_id] = _CacheEntry(
-                    text=text,
-                    fetched_at=now,
-                    checked_at=now,
-                    etag=etag,
-                    modified_time=mtime,
-                )
+                mtime = await self._get_modified_time(doc_id)
+                self._CACHE[doc_id] = _CacheEntry(text=text, fetched_at=now, checked_at=now, modified_time=mtime)
                 return text
 
-            # 4) Иначе возвращаем кеш
             return entry.text
-
-    @classmethod
-    async def create(
-        cls,
-        doc_url: str,
-        service_account_file: Optional[str] = None,
-        cache_ttl_sec: int = 60,
-        meta_check_ttl_sec: int = 10,
-    ) -> "GoogleDocTemplateReader":
-        self = cls(
-            doc_url=doc_url,
-            service_account_file=service_account_file,
-            cache_ttl_sec=cache_ttl_sec,
-            meta_check_ttl_sec=meta_check_ttl_sec,
-        )
-        await self._init_client()
-        return self
