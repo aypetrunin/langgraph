@@ -38,6 +38,7 @@ class DynamicSystemPrompt(AgentMiddleware):
 
         # --- DEV: берём шаблон из Google Docs ---
         if env == "dev":
+            logger.info("Шаблон из Google.")
             # В dev допускаем, что template_prompt_system может быть URL,
             # а также поддерживаем отдельный ключ template_prompt_system_url
             doc_url = data.get("template_prompt_system_url") or data.get("template_prompt_system")
@@ -46,13 +47,14 @@ class DynamicSystemPrompt(AgentMiddleware):
 
             reader = await GoogleDocTemplateReader.create(
                 doc_url=doc_url,
-                cache_ttl_sec=60,        # держим текст 60с
-                meta_check_ttl_sec=10,   # каждые 10с проверяем изменения (etag/modifiedTime)
+                cache_ttl_sec=120,        # держим текст 60с
+                meta_check_ttl_sec=60,   # каждые 60с проверяем изменения (etag/modifiedTime)
             )
             source = await reader.read_text()
-
         # --- PROD: берём шаблон из файла ---
         else:
+            logger.info("Шаблон из Памяти.")
+
             tpl_system_prompt = data["template_prompt_system"]  # имя файла (например: "system_prompt.j2")
             tpl_path = Path(__file__).parent / "template" / tpl_system_prompt
 
