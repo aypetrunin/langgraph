@@ -16,8 +16,7 @@ from typing import Optional
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-from ..common import logger, retry_async  # type: ignore
-
+from .zena_common import logger, retry_async # type: ignore
 _DOC_ID_RE = re.compile(r"/document/d/([a-zA-Z0-9_-]+)")
 
 # 🔐 кеш временного файла, чтобы не плодить файлы при retry
