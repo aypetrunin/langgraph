@@ -153,11 +153,14 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
                 resp_json = response.json()
-
                 result = {
                     "office_id": office_id,
                     "masters": [
-                        {"master_id": s["id"], "master_name": s["name"]}
+                        {
+                            "master_id": s["id"],
+                            "master_name": s["name"],
+                            "position":s.get("position") if isinstance(s.get("position"), str)  else s.get("position", {}).get('title') 
+                        }
                         for s in resp_json.get("staff", [])
                     ],
                 }
@@ -193,7 +196,7 @@ async def main():
     #     phone=phone,
     # )
 
-    response = await fetch_masters_info(channel_id = 1)
+    response = await fetch_masters_info(channel_id = 21)
     print(response)
 
 

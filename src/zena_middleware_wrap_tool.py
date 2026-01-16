@@ -193,10 +193,10 @@ async def pp_remember_master(result: ToolMessage, request: ToolCallRequest) -> A
         logger.info("===pp_remember_master===")
         logger.info(f"tools_result: {tools_result}")
         if tools_result.get("success") and tools_result.get("master_id"):
-            data["desired_master"] = [{
+            data["desired_master"] = {
                 'master_id': str(tools_result["master_id"]),
                 'master_name': str(tools_result["master_name"])
-            }]
+            }
             logger.info(f"data['desired_master']: {data['desired_master']}")
 
     return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
