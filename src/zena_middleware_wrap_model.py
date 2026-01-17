@@ -41,7 +41,11 @@ class DynamicSystemPrompt(AgentMiddleware):
             logger.info("Шаблон из Google.")
             # В dev допускаем, что template_prompt_system может быть URL,
             # а также поддерживаем отдельный ключ template_prompt_system_url
-            doc_url = data.get("template_prompt_system_url") or data.get("template_prompt_system")
+            doc_url = request.runtime.context.get('_prompt_google_url')
+            
+            if not doc_url:
+                doc_url = data.get("template_prompt_system_url") or data.get("template_prompt_system")
+
             if not doc_url:
                 raise RuntimeError("Missing template_prompt_system_url (or template_prompt_system as URL) in dev")
 

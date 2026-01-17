@@ -55,13 +55,15 @@ def get_service_account_file() -> str:
     if not sa_json:
         raise RuntimeError("Missing Google credentials: set GOOGLE_SA_JSON or SERVICE_ACCOUNT_FILE")
 
-    # проверяем, что JSON валидный
     json.loads(sa_json)
 
-    tmp = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json")
-    tmp.write(sa_json)
-    tmp.flush()
-    tmp.close()
+    tmp_dir = os.getenv("TMPDIR") or "/tmp"
+    tmp = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json", dir=tmp_dir)
+    try:
+        tmp.write(sa_json)
+        tmp.flush()
+    finally:
+        tmp.close()
 
     _TMP_SA_FILE = tmp.name
     return _TMP_SA_FILE

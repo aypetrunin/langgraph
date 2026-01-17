@@ -142,8 +142,8 @@ class GetDatabaseMiddleware(AgentMiddleware):
 
             data = gathered.setdefault("data", {})
             state_data = state.get("data") or {}
-            logger.info(f"state_data: {state_data}")
-            logger.info(f"gathered: {gathered}")
+            # logger.info(f"state_data: {state_data}")
+            # logger.info(f"gathered: {gathered}")
 
             # dialog_state / dialog_state_in
             dialog_state = state_data.get("dialog_state") or "new"

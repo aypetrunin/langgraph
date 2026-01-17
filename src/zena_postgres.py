@@ -10,7 +10,8 @@ from pathlib import Path
 from typing_extensions import Any, Dict, List, Iterable
 
 from .zena_common import logger, retry_async
-from .zena_requests import fetch_personal_info, fetch_masters_info
+from .zena_requests import fetch_personal_info # , fetch_masters_info
+from .zena_request_masters_cache import fetch_masters_info
 
 if not os.getenv("IS_DOCKER"):
     ROOT = Path(__file__).resolve().parents[3]

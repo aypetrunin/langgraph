@@ -39,6 +39,7 @@ class Context(TypedDict):
     _access_token: str
     _user_id: int
     _studio: bool
+    _prompt_google_url: str
 
 
 class InputState(TypedDict, total=True):
