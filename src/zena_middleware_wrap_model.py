@@ -5,10 +5,11 @@ from typing import Any, Callable
 
 import aiofiles
 import os
+import hashlib
 
 from pathlib import Path
 from typing import Callable
-from jinja2 import Template
+from jinja2 import Template, Environment, StrictUndefined
 
 from langchain_core.tools.structured import StructuredTool
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -33,49 +34,150 @@ class DynamicSystemPrompt(AgentMiddleware):
     ) -> ModelResponse:
         logger.info("==awrap_model_call==DynamicSystemPrompt==")
 
-        data = request.state.get("data", {})
-        env = os.getenv("ENV", "prod").lower()
+        # Берём data из state, но делаем копию, чтобы избежать неожиданных сайд-эффектов
+        state = request.state or {}
+        data = dict(state.get("data", {}) or {})
 
-        # --- DEV: берём шаблон из Google Docs ---
-        if env == "dev":
-            logger.info("Шаблон из Google.")
-            # В dev допускаем, что template_prompt_system может быть URL,
-            # а также поддерживаем отдельный ключ template_prompt_system_url
-            doc_url = request.runtime.context.get('_prompt_google_url')
-            
-            if not doc_url:
-                doc_url = data.get("template_prompt_system_url") or data.get("template_prompt_system")
+        env_name = (os.getenv("ENV", "prod") or "prod").strip().lower()
+        is_dev = env_name == "dev"
 
-            if not doc_url:
-                raise RuntimeError("Missing template_prompt_system_url (or template_prompt_system as URL) in dev")
+        source = await self._load_template_source(request=request, data=data, is_dev=is_dev)
 
-            reader = await GoogleDocTemplateReader.create(
-                doc_url=doc_url,
-                cache_ttl_sec=120,        # держим текст 60с
-                meta_check_ttl_sec=60,   # каждые 60с проверяем изменения (etag/modifiedTime)
-            )
-            source = await reader.read_text()
-        # --- PROD: берём шаблон из файла ---
-        else:
-            logger.info("Шаблон из Памяти.")
+        # Строгий рендеринг: если переменной нет — лучше упасть здесь, чем получить пустой prompt
+        jinja = Environment(undefined=StrictUndefined)
+        system_prompt = jinja.from_string(source).render(**data)
 
-            tpl_system_prompt = data["template_prompt_system"]  # имя файла (например: "system_prompt.j2")
-            tpl_path = Path(__file__).parent / "template" / tpl_system_prompt
-
-            async with aiofiles.open(tpl_path, encoding="utf-8") as f:
-                source = await f.read()
-
-        logger.info(f"request.state: {request.state}\n")
-
-        system_prompt = Template(source).render(**data)
-
-        # Важно: не затирать, а сохранять отрендеренный prompt
+        # Сохраняем отрендеренный prompt (как у вас и задумано)
         data["prompt_system"] = system_prompt
+        # Важно: если дальше кто-то читает request.state["data"], обновим state тоже
+        request.state["data"] = data
 
-        logger.info(f"dialog_state:{data.get('dialog_state')}\n")
-        logger.info(f"system_prompt:\n{system_prompt}\n")
+        # Логи: лучше не печатать весь prompt в prod
+        self._log_prompt(system_prompt=system_prompt, data=data, is_dev=is_dev)
 
         return await handler(request.override(system_prompt=system_prompt))
+
+    async def _load_template_source(self, request: ModelRequest, data: dict, is_dev: bool) -> str:
+        """
+        Правило выбора источника:
+        - Если есть URL (контекст или data) — читаем Google Doc
+          (в dev можно брать URL и из template_prompt_system, если он выглядит как URL)
+        - Иначе читаем файл template_prompt_system из template/
+        """
+        doc_url = self._resolve_doc_url(request=request, data=data, is_dev=is_dev)
+
+        if doc_url:
+            reader = await GoogleDocTemplateReader.create(
+                doc_url=doc_url,
+                cache_ttl_sec=120,
+                meta_check_ttl_sec=60,
+            )
+            return await reader.read_text()
+
+        tpl_name = data.get("template_prompt_system")
+        if not tpl_name:
+            raise RuntimeError(
+                "Missing template_prompt_system. Provide a filename (e.g. system_prompt.j2) "
+                "or template_prompt_system_url/_prompt_google_url for Google Docs."
+            )
+
+        tpl_path = Path(__file__).parent / "template" / tpl_name
+        if not tpl_path.exists():
+            raise FileNotFoundError(f"Template file not found: {tpl_path}")
+
+        async with aiofiles.open(tpl_path, encoding="utf-8") as f:
+            return await f.read()
+
+    def _resolve_doc_url(self, request: ModelRequest, data: dict, is_dev: bool) -> str | None:
+        doc_url = None
+
+        # 1) runtime.context — ТОЛЬКО в dev
+        if is_dev:
+            ctx = getattr(request.runtime, "context", None) or {}
+            doc_url = ctx.get("_prompt_google_url")
+
+        # 2) явный ключ в data — разрешён и в dev, и в prod
+        if not doc_url:
+            doc_url = data.get("template_prompt_system_url")
+
+        return doc_url
+
+
+    def _log_prompt(self, system_prompt: str, data: dict, is_dev: bool) -> None:
+        dialog_state = data.get("dialog_state")
+        logger.info("dialog_state=%r", dialog_state)
+
+        prompt_len = len(system_prompt)
+        prompt_hash = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()[:12]
+
+        if is_dev:
+            # В dev можно позволить себе больше, но всё равно осторожно:
+            logger.info("system_prompt(len=%s, sha=%s):\n%s", prompt_len, prompt_hash, system_prompt)
+        else:
+            # В prod — только метаданные
+            logger.info("system_prompt rendered (len=%s, sha=%s)", prompt_len, prompt_hash)
+
+
+# class DynamicSystemPrompt(AgentMiddleware):
+#     async def awrap_model_call(
+#         self,
+#         request: ModelRequest,
+#         handler: Callable[[ModelRequest], ModelResponse],
+#     ) -> ModelResponse:
+#         logger.info("==awrap_model_call==DynamicSystemPrompt==")
+
+#         data = request.state.get("data", {})
+#         env = os.getenv("ENV", "prod").lower()
+
+#         # --- DEV: берём шаблон из Google Docs ---
+#         if env == "dev":
+#             logger.info("Шаблон из Google.")
+#             # В dev допускаем, что template_prompt_system может быть URL,
+#             # а также поддерживаем отдельный ключ template_prompt_system_url
+#             doc_url = request.runtime.context.get('_prompt_google_url')
+            
+#             if not doc_url:
+#                 doc_url = data.get("template_prompt_system_url") or data.get("template_prompt_system")
+
+#             if not doc_url:
+#                 raise RuntimeError("Missing template_prompt_system_url (or template_prompt_system as URL) in dev")
+
+#             reader = await GoogleDocTemplateReader.create(
+#                 doc_url=doc_url,
+#                 cache_ttl_sec=120,        # держим текст 60с
+#                 meta_check_ttl_sec=60,   # каждые 60с проверяем изменения (etag/modifiedTime)
+#             )
+#             source = await reader.read_text()
+#         # --- PROD: берём шаблон из файла ---
+#         else:
+
+#             doc_url = data.get("template_prompt_system_url")
+            
+#             if doc_url:
+#                 reader = await GoogleDocTemplateReader.create(
+#                     doc_url=doc_url,
+#                     cache_ttl_sec=120,        # держим текст 60с
+#                     meta_check_ttl_sec=60,   # каждые 60с проверяем изменения (etag/modifiedTime)
+#                 )
+#                 source = await reader.read_text()
+#             else:
+#                 tpl_system_prompt = data["template_prompt_system"]  # имя файла (например: "system_prompt.j2")
+#                 tpl_path = Path(__file__).parent / "template" / tpl_system_prompt
+
+#                 async with aiofiles.open(tpl_path, encoding="utf-8") as f:
+#                     source = await f.read()
+
+#         logger.info(f"request.state: {request.state}\n")
+
+#         system_prompt = Template(source).render(**data)
+
+#         # Важно: не затирать, а сохранять отрендеренный prompt
+#         data["prompt_system"] = system_prompt
+
+#         logger.info(f"dialog_state:{data.get('dialog_state')}\n")
+#         logger.info(f"system_prompt:\n{system_prompt}\n")
+
+#         return await handler(request.override(system_prompt=system_prompt))
 
 
 # class DynamicSystemPrompt(AgentMiddleware):
