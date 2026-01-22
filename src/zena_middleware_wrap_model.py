@@ -9,7 +9,7 @@ import hashlib
 
 from pathlib import Path
 from typing import Callable
-from jinja2 import Template, Environment, StrictUndefined
+from jinja2 import Template, Environment, StrictUndefined, DebugUndefined
 
 from langchain_core.tools.structured import StructuredTool
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -44,7 +44,8 @@ class DynamicSystemPrompt(AgentMiddleware):
         source = await self._load_template_source(request=request, data=data, is_dev=is_dev)
 
         # Строгий рендеринг: если переменной нет — лучше упасть здесь, чем получить пустой prompt
-        jinja = Environment(undefined=StrictUndefined)
+        # jinja = Environment(undefined=StrictUndefined)
+        jinja = Environment(undefined=DebugUndefined)
         system_prompt = jinja.from_string(source).render(**data)
 
         # Сохраняем отрендеренный prompt (как у вас и задумано)

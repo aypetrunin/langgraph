@@ -53,19 +53,12 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
         # Важно: на одном соединении asyncpg нельзя выполнять несколько запросов одновременно.
         # Поэтому либо запускаем их последовательно на одном conn, либо используем пул (см. вариант 2).
         # Здесь делаем последовательную выборку, а не gather на одном conn.
-        # dialog = await fetch_dialog(conn, user_companychat)
         prompts_info = await fetch_prompts(conn, user_companychat)
-        # dialog, query = await fetch_dialog(conn, user_companychat)
         category = await fetch_category(conn, channel_id)
         products_full = await fetch_services(conn, channel_id)
         probny = await fetch_probny(conn, channel_id)
         first_dialog = await fetch_is_first_dialog(conn, user_companychat)
         masters_info = await fetch_masters_info(channel_id)
-        # dialog_state = await fetch_dialog_state(conn, session_id)
-        # product_list = await fetch_product_list(conn, session_id)
-        # product_id = await fetch_product_id(conn, session_id)
-        # available_time = await fetch_avaliable_time(conn, session_id)
-        # avaliable_sequences = await fetch_avaliable_sequences(conn, session_id)
         user_info = await fetch_personal_info(user_id)
 
         data = {
@@ -77,15 +70,8 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
             "products_full" : products_full,
             "probny": probny,
             "first_dialog": first_dialog,
-            # "dialog_state": dialog_state,
-            # "product_list": product_list,
-            # "product_id": product_id,
             "user_info": user_info,
             "masters_info": masters_info,
-            # "dialog": dialog,
-            # "query": query,
-            # "available_time": available_time,
-            # "avaliable_sequences": avaliable_sequences
         }
         flat_data = flatten_dict_no_prefix(data)
         return {"data": flat_data}
@@ -377,197 +363,6 @@ async def fetch_probny(conn: asyncpg.Connection, channel_id: int) -> str:
 
 
 @retry_async()
-async def fetch_dialog_state(conn: asyncpg.Connection, session_id: int) -> str:
-    """Получение состояние диалога."""
-    row: asyncpg.Record | None = await conn.fetchrow(
-        """
-        SELECT ds.name AS status
-        FROM dialog_state ds
-        WHERE ds.name IS NOT NULL
-          AND ds.session_id = $1
-        ORDER BY ds.id DESC
-        LIMIT 1
-        """,
-        session_id,
-    )
-    status = row["status"] if row and row["status"] is not None else "new"
-    # Нормализация: пустые/пробельные статусы трактуем как 'new'
-    if isinstance(status, str) and not status.strip():
-        return "new"
-    return status
-
-
-@retry_async()
-async def fetch_product_list(
-    conn: asyncpg.Connection, session_id: int
-) -> dict[str, Any]:
-    """Получение списка услуг товаров в последнем поиске."""
-    row: asyncpg.Record | None = await conn.fetchrow(
-        """
-        SELECT
-            ds.id,
-            (ds.data -> 'product_search' -> 'query_search')::text AS query_search,
-            (ds.data -> 'product_search' -> 'product_list')::text AS product_list
-        FROM dialog_state ds
-        WHERE ds.name = 'selecting'
-          AND ds.session_id = $1
-        ORDER BY ds.id DESC
-        LIMIT 1
-        """,
-        session_id,
-    )
-    if not row:
-        return {"query_search": None, "products": [], "products_text": "", "count": 0}
-
-    # Нормализация query_search: ::text может вернуть строку в кавычках
-    query_search = None
-    raw_query = row["query_search"]
-    if raw_query is not None:
-        q = str(raw_query).strip()
-        if len(q) >= 2 and q[0] == '"' and q[-1] == '"':
-            q = q[1:-1]
-        query_search = q
-
-    products: list[dict[str, Any]] = []
-    raw_list = row["product_list"]
-    if raw_list is not None:
-        raw = str(raw_list).strip()
-        try:
-            items = json.loads(raw)
-            if isinstance(items, list):
-                for it in items:
-                    products.append(
-                        {
-                            "product_id": it.get("product_id"),
-                            "product_name": (it.get("product_name") or "").strip(),
-                            "price": it.get("price"),
-                        }
-                    )
-        except json.JSONDecodeError:
-            pass
-
-    product_list = ", ".join(
-        [
-            f"product_id: {p['product_id']}. Название: '{p['product_name']}'. Стоимость: {p['price']}"
-            for p in products
-            if p.get("product_id") is not None
-            and p.get("product_name")
-            and p.get("price") is not None
-        ]
-    )
-
-    return {
-        "query_search": query_search,
-        "product_list": product_list,
-    }
-
-
-@retry_async()
-async def fetch_product_id(conn: asyncpg.Connection, session_id: int) -> dict[str, Any]:
-    """Получение id и названия выбранного клиентов товара/услуги."""
-    row: asyncpg.Record | None = await conn.fetchrow(
-        """
-        SELECT
-            ds.id,
-            (ds.data -> 'product_id' -> 'product_name')::text AS product_name,
-            (ds.data -> 'product_id' -> 'product_id')::text   AS product_id
-        FROM dialog_state ds
-        WHERE ds.name = 'record'
-          AND ds.session_id = $1
-        ORDER BY ds.id DESC
-        LIMIT 1
-        """,
-        session_id,
-    )
-    if not row:
-        return {"product_id": None, "product_name": None}
-
-    # ::text может вернуть строку в кавычках, аккуратно снимаем их
-    def normalize_text(val: str | None) -> str | None:
-        """Нормальзация текста."""
-        if val is None:
-            return None
-        s = str(val).strip()
-        if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
-            s = s[1:-1]
-        return s
-
-    product_id = normalize_text(row["product_id"])
-    product_name = normalize_text(row["product_name"])
-
-    return {"product_id": product_id, "product_name": product_name}
-
-
-@retry_async()
-async def fetch_avaliable_time(conn: asyncpg.Connection, session_id: int) -> dict[str, Any]:
-    """Получение id и названия выбранного клиентов товара/услуги."""
-    row: asyncpg.Record | None = await conn.fetchrow(
-        """
-        SELECT
-            ds.id,
-            (ds.data -> 'available_time' -> 'avaliable_time_for_master')::text AS available_time
-        FROM dialog_state ds
-        WHERE ds.name = 'available_time'
-          AND ds.session_id = $1
-        ORDER BY ds.id DESC
-        LIMIT 1
-        """,
-        session_id,
-    )
-    if not row:
-        return {"available_time": None}
-
-    # ::text может вернуть строку в кавычках, аккуратно снимаем их
-    def normalize_text(val: str | None) -> str | None:
-        """Нормальзация текста."""
-        if val is None:
-            return None
-        s = str(val).strip()
-        if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
-            s = s[1:-1]
-        return s
-
-    available_time = normalize_text(row["available_time"])
-
-    return {"available_time": available_time}
-
-
-@retry_async()
-async def fetch_avaliable_sequences(conn: asyncpg.Connection, session_id: int) -> dict[str, Any]:
-    """Получение id и названия выбранного клиентов товара/услуги."""
-    row: asyncpg.Record | None = await conn.fetchrow(
-        """
-        SELECT
-            ds.id,
-            (ds.data -> 'available_time' -> 'available_sequences')::text AS available_sequences
-        FROM dialog_state ds
-        WHERE ds.name = 'available_time'
-          AND ds.session_id = $1
-        ORDER BY ds.id DESC
-        LIMIT 1
-        """,
-        session_id,
-    )
-    if not row:
-        return {"available_sequences": None}
-
-    # ::text может вернуть строку в кавычках, аккуратно снимаем их
-    def normalize_text(val: str | None) -> str | None:
-        """Нормальзация текста."""
-        if val is None:
-            return None
-        s = str(val).strip()
-        if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
-            s = s[1:-1]
-        return s
-
-    available_sequences = normalize_text(row["available_sequences"])
-
-    return {"available_sequences": available_sequences}
-
-
-
-@retry_async()
 async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
     """Удаление истории диалога. Используется для тестирования."""
     conn = await asyncpg.connect(**POSTGRES_CONFIG)
@@ -584,15 +379,12 @@ async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
         try:
             async with conn.transaction():
 
-                del_dialog_state = await conn.execute(
-                    "DELETE FROM dialog_state WHERE session_id = $1", session_id
-                )
                 del_bot_history  = await conn.execute(
                     "DELETE FROM public.bot_history bh WHERE bh.user_companychat = $1;",
                     user_companychat
                 )
             success = True
-            logger.info(f"Данные из истории удалены: {del_bot_history}, {del_dialog_state}")
+            logger.info(f"Данные из истории удалены: {del_bot_history}")
         except Exception as e:
             logger.error(f"Error deleting history messages: {e}")
             success = False
@@ -610,13 +402,6 @@ async def delete_personal_data(user_companychat: int) -> Dict[str, Any]:
     try:
         channel_info = await fetch_channel_info(conn, user_companychat)
         logger.info(f"channel_info: {channel_info}")
-        # session_id = channel_info.get("session_id")
-        # if not session_id:
-        #     logger.error(
-        #         f"Session ID not found for user_companychat={user_companychat}"
-        #     )
-        #     return {"success": False, "error": "session_id not found"}
-
         success = False
         try:
             async with conn.transaction():
