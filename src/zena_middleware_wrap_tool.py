@@ -168,9 +168,17 @@ async def pp_recommendations(result: ToolMessage, request: ToolCallRequest) -> A
 async def pp_record(result: ToolMessage, request: ToolCallRequest) -> Any:
     def on_ok(data: dict, tools_result: dict, request: ToolCallRequest) -> None:
         if tools_result.get("success"):
-            if tools_result["data"]:
+            if not tools_result["data"]:
                 data["user_records"] = "У Вас нет записей на услуги."
             data["user_records"] = tools_result["data"]
+    return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
+
+async def pp_record_delete(result: ToolMessage, request: ToolCallRequest) -> Any:
+    def on_ok(data: dict, tools_result: dict, request: ToolCallRequest) -> None:
+        if tools_result.get("success"):
+            # после успешного удаления очищаем список так как он не актуален.
+            data["user_records"] = []
+
     return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
 
 async def pp_remember_office(result: ToolMessage, request: ToolCallRequest) -> Any:
@@ -277,6 +285,7 @@ TOOL_POSTPROCESSORS_DEFAULT: dict[str, PostProcessor] = {
     "zena_remember_desired_date": pp_remember_desired_date,
     "zena_remember_desired_time": pp_remember_desired_time,
     "zena_record": pp_record,
+    "zena_record_delete": pp_record_delete,
 }
 
 TOOL_POSTPROCESSORS_5007: dict[str, PostProcessor] = {

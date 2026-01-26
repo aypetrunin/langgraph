@@ -139,6 +139,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
         "zena_remember_desired_time",
         # инструменты работы с записанными услугами
         "zena_records",
+        "zena_record_delete"
     }
 
     # Stage tools для classic портов (400x/500x)
