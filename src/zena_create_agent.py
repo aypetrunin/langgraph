@@ -16,6 +16,7 @@ from langchain.agents.middleware import (
     LLMToolSelectorMiddleware,
     ModelFallbackMiddleware,
     PIIMiddleware,
+    ToolCallLimitMiddleware,
 )
 
 
@@ -114,6 +115,9 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
                 model_4o_mini,
                 model_4o_mini_reserv,
             ),
+            ToolCallLimitMiddleware(
+                run_limit=5,
+            )
             # PIIMiddleware(
             #     "phone",
             #     detector = re.compile(r'^(\+?7|8)?[\s.-]?(\(?\d{3,5}\)?)?[\s.-]?\d{3}[\s.-]?\d{2}[\s.-]?\d{2}$'),

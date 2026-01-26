@@ -5,6 +5,7 @@ import asyncio
 import httpx
 
 from typing import Any
+from datetime import datetime
 
 from .zena_common import logger, retry_async
 
@@ -21,13 +22,84 @@ async def fetch_personal_info(user_id: int) -> dict[str, Any]:
 
     logger.info(f"Отправка запроса: {url}")
 
-    timeout = aiohttp.ClientTimeout(total=10)
+    timeout = aiohttp.ClientTimeout(total=120)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url) as resp:
             if resp.status == 200:
                 return await resp.json()
             logger.warning(f"Ошибка запроса: {resp.status}")
             raise RuntimeError(f"Ошибка запроса: {resp.status}")
+
+
+
+
+def analyze_response(response: dict) -> list:
+    # 1. Проверяем success верхнего уровня
+    if not response.get('success'):
+        return []
+
+    result = []
+
+    # 2. Проходим по records
+    for record in response.get('records', []):
+        # 3. Проверяем success записи
+        if not record.get('success'):
+            continue
+
+        # 4. Оставляем только статус "Ожидает..."
+        if record.get('status') != 'Ожидает...':
+            continue
+
+        master = record.get('master_id', {})
+        product = record.get('product', {})
+
+        # 5. Формируем новый словарь
+        result.append({
+            "record_id": record.get('id'),
+            "record_date": record.get('date'),
+            "master_id": master.get('id'),
+            "master_name": master.get('name'),
+            "product_id": product.get('id'),
+            "product_name": product.get('name'),
+        })
+
+    # 6. Сортировка по дате (от ранней к поздней)
+    result.sort(
+        key=lambda x: datetime.strptime(x["record_date"], "%Y-%m-%d %H:%M")
+    )
+
+    return result
+
+
+
+@retry_async()
+async def fetch_personal_records(
+    user_companychat: int,
+    channel_id: str,
+) -> dict[str, Any]:
+    """Получение списка услуг на которые записан клиент через API."""
+
+    logger.info("===zena_requests.fetch_personal_records===")
+
+    url = f"https://httpservice.ai2b.pro/appointments/client/records"
+
+    payload = {
+        "user_companychat": user_companychat,
+        "channel_id": channel_id
+    }
+
+    logger.info(f"Отправка запроса: {url}")
+
+    timeout = aiohttp.ClientTimeout(total=120)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(url, json=payload) as resp:
+             if resp.status == 200:
+                responce = await resp.json()
+                logger.info(f"responce: {responce}")
+                responce_format = analyze_response(responce)
+                logger.info(f"responce_format: {responce_format}")
+                return responce_format
+
 
 
 @retry_async()
@@ -195,9 +267,9 @@ async def main():
     # response = await fetch_crm_go_client_info(
     #     phone=phone,
     # )
-
-    response = await fetch_masters_info(channel_id = 21)
-    print(response)
+    response = await fetch_personal_records(user_companychat=145, channel_id = 1)
+    # response = await fetch_masters_info(channel_id = 21)
+    # print(response)
 
 
 if __name__ == "__main__":

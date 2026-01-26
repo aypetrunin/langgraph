@@ -122,6 +122,7 @@ class GetDatabaseMiddleware(AgentMiddleware):
         "desired_date",
         "desired_time",
         "desired_master",
+        "user_records",
     )
 
     @hook_config(can_jump_to=["end"])
@@ -135,7 +136,7 @@ class GetDatabaseMiddleware(AgentMiddleware):
 
             ctx = runtime.context or {}
             user_companychat = ctx.get("_user_companychat")
-
+            
             gathered = await data_collection_postgres(user_companychat)
             if not isinstance(gathered, dict):
                 raise TypeError(f"data_collection_postgres returned {type(gathered)!r}, expected dict")
@@ -149,11 +150,12 @@ class GetDatabaseMiddleware(AgentMiddleware):
             dialog_state = state_data.get("dialog_state") or "new"
             data["dialog_state"] = dialog_state
             data["dialog_state_in"] = dialog_state
+            data["user_companychat"] = user_companychat
 
             # дефолты для списковых ключей
             for key in self._LIST_DEFAULT_KEYS:
                 data[key] = state_data.get(key) or data.get(key) or []
-
+ 
             mcp_port = data.get("mcp_port")
             logger.info("mcp_port=%s", mcp_port)
 

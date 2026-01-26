@@ -38,6 +38,8 @@ class DynamicSystemPrompt(AgentMiddleware):
         state = request.state or {}
         data = dict(state.get("data", {}) or {})
 
+        logger.info(f"data: {data}")
+
         env_name = (os.getenv("ENV", "prod") or "prod").strip().lower()
         is_dev = env_name == "dev"
 
@@ -119,97 +121,6 @@ class DynamicSystemPrompt(AgentMiddleware):
             logger.info("system_prompt rendered (len=%s, sha=%s)", prompt_len, prompt_hash)
 
 
-# class DynamicSystemPrompt(AgentMiddleware):
-#     async def awrap_model_call(
-#         self,
-#         request: ModelRequest,
-#         handler: Callable[[ModelRequest], ModelResponse],
-#     ) -> ModelResponse:
-#         logger.info("==awrap_model_call==DynamicSystemPrompt==")
-
-#         data = request.state.get("data", {})
-#         env = os.getenv("ENV", "prod").lower()
-
-#         # --- DEV: берём шаблон из Google Docs ---
-#         if env == "dev":
-#             logger.info("Шаблон из Google.")
-#             # В dev допускаем, что template_prompt_system может быть URL,
-#             # а также поддерживаем отдельный ключ template_prompt_system_url
-#             doc_url = request.runtime.context.get('_prompt_google_url')
-            
-#             if not doc_url:
-#                 doc_url = data.get("template_prompt_system_url") or data.get("template_prompt_system")
-
-#             if not doc_url:
-#                 raise RuntimeError("Missing template_prompt_system_url (or template_prompt_system as URL) in dev")
-
-#             reader = await GoogleDocTemplateReader.create(
-#                 doc_url=doc_url,
-#                 cache_ttl_sec=120,        # держим текст 60с
-#                 meta_check_ttl_sec=60,   # каждые 60с проверяем изменения (etag/modifiedTime)
-#             )
-#             source = await reader.read_text()
-#         # --- PROD: берём шаблон из файла ---
-#         else:
-
-#             doc_url = data.get("template_prompt_system_url")
-            
-#             if doc_url:
-#                 reader = await GoogleDocTemplateReader.create(
-#                     doc_url=doc_url,
-#                     cache_ttl_sec=120,        # держим текст 60с
-#                     meta_check_ttl_sec=60,   # каждые 60с проверяем изменения (etag/modifiedTime)
-#                 )
-#                 source = await reader.read_text()
-#             else:
-#                 tpl_system_prompt = data["template_prompt_system"]  # имя файла (например: "system_prompt.j2")
-#                 tpl_path = Path(__file__).parent / "template" / tpl_system_prompt
-
-#                 async with aiofiles.open(tpl_path, encoding="utf-8") as f:
-#                     source = await f.read()
-
-#         logger.info(f"request.state: {request.state}\n")
-
-#         system_prompt = Template(source).render(**data)
-
-#         # Важно: не затирать, а сохранять отрендеренный prompt
-#         data["prompt_system"] = system_prompt
-
-#         logger.info(f"dialog_state:{data.get('dialog_state')}\n")
-#         logger.info(f"system_prompt:\n{system_prompt}\n")
-
-#         return await handler(request.override(system_prompt=system_prompt))
-
-
-# class DynamicSystemPrompt(AgentMiddleware):
-#     async def awrap_model_call(
-#         self,
-#         request: ModelRequest,
-#         handler: Callable[[ModelRequest], ModelResponse],
-#     ) -> ModelResponse:
-#         logger.info("==awrap_model_call==DynamicSystemPrompt==")
-        
-#         tpl_system_prompt = request.state["data"]["template_prompt_system"]
-#         tpl_path = Path(__file__).parent / "template" / tpl_system_prompt
-
-#         async with aiofiles.open(tpl_path, encoding="utf-8") as f:
-#             source = await f.read()
-#         logger.info(f"request.state: {request.state}\n")
-#         data = request.state.get("data", {})
-#         system_prompt = Template(source).render(**data)
-#         data["prompt_system"] = "" # system_prompt
-#         logger.info(f"dialog_state:{data['dialog_state']}\n")
-#         logger.info(f"system_prompt:\n{system_prompt[:]}\n")
-#         return await handler(request.override(system_prompt=system_prompt))
-
-
-# tool_selector_middleware.py
-# Полная версия для вставки:
-# - globals: zena_faq, zena_services + remember-tools доступны всегда (state-neutral)
-# - inherit_previous: инструменты предыдущих стадий доступны на текущей (classic ports)
-# - guards: слоты только если есть office_id+desired_date; запись только если есть контакты+desired_time
-# - postrecord override: после записи только zena_recommendations
-
 
 class ToolSelectorMiddleware(AgentMiddleware):
     """Middleware для выбора релевантных инструментов по состоянию диалога + guards."""
@@ -226,6 +137,8 @@ class ToolSelectorMiddleware(AgentMiddleware):
         "zena_remember_master",
         "zena_remember_desired_date",
         "zena_remember_desired_time",
+        # инструменты работы с записанными услугами
+        "zena_records",
     }
 
     # Stage tools для classic портов (400x/500x)

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing_extensions import Any, Dict, List, Iterable
 
 from .zena_common import logger, retry_async
-from .zena_requests import fetch_personal_info # , fetch_masters_info
+from .zena_requests import fetch_personal_info, fetch_personal_records
 from .zena_request_masters_cache import fetch_masters_info
 
 if not os.getenv("IS_DOCKER"):
@@ -60,6 +60,7 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
         first_dialog = await fetch_is_first_dialog(conn, user_companychat)
         masters_info = await fetch_masters_info(channel_id)
         user_info = await fetch_personal_info(user_id)
+        # user_records = await fetch_personal_records(user_companychat, channel_id)
 
         data = {
             "user_id": user_id,
@@ -71,6 +72,7 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
             "probny": probny,
             "first_dialog": first_dialog,
             "user_info": user_info,
+            # "user_records": user_records,
             "masters_info": masters_info,
         }
         flat_data = flatten_dict_no_prefix(data)
