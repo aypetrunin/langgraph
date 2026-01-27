@@ -301,7 +301,6 @@ class ToolSelectorMiddleware(AgentMiddleware):
             if self._has_desired_date(data):
                 allowed.add("zena_avaliable_time_for_master")
                 allowed.add("zena_available_time_for_master_list")
-                allowed.discard("zena_record_delete")
             else:
                 allowed.discard("zena_avaliable_time_for_master")
                 allowed.discard("zena_available_time_for_master_list")
@@ -311,12 +310,6 @@ class ToolSelectorMiddleware(AgentMiddleware):
                 allowed.add("zena_record_reschedule")
             else:
                 allowed.discard("zena_record_reschedule")
-        # else:
-        #     # Записей нет — отключаем ветку отмена/перенос
-        #     allowed.discard("zena_record_delete")
-        #     allowed.discard("zena_record_reschedule")
-        #     allowed.discard("zena_avaliable_time_for_master")
-        #     allowed.discard("zena_available_time_for_master_list")
 
         return allowed
 
@@ -423,7 +416,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
             return model_4o_mini
 
         if mcp_port in self.CLASSIC_PORTS:
-            return model_4o if dialog_state in ("new", "remember", "postrecord") else model_4o_mini
+            return model_4o if dialog_state in ("new", "remember") else model_4o_mini
 
         return model_4o_mini
 

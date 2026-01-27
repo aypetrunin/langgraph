@@ -27,6 +27,24 @@ POSTGRES_CONFIG = {
     "port": os.getenv("POSTGRES_PORT"),
 }
 
+async def get_weekday_info(dt: datetime | None = None) -> tuple[int, str]:
+    """Асинхронно возвращает номер и название дня недели."""
+    if dt is None:
+        dt = datetime.now()
+
+    weekdays_ru = (
+        "понедельник",
+        "вторник",
+        "среда",
+        "четверг",
+        "пятница",
+        "суббота",
+        "воскресенье",
+    )
+
+    weekday_num = dt.weekday()
+    return weekday_num, weekdays_ru[weekday_num]
+
 
 def flatten_dict_no_prefix(d: dict[str, Any]) -> dict[str, Any]:
     """Функция получения плоского словаря."""
@@ -38,7 +56,6 @@ def flatten_dict_no_prefix(d: dict[str, Any]) -> dict[str, Any]:
             items[key] = value
     return items
 
-
 async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
     """Функция получения всех данных из Postgres."""
     conn = await asyncpg.connect(**POSTGRES_CONFIG)
@@ -49,10 +66,7 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
         session_id = channel_info["session_id"]
         user_id = channel_info["user_id"]
 
-        # 2) Параллельный сбор зависимых данных
-        # Важно: на одном соединении asyncpg нельзя выполнять несколько запросов одновременно.
-        # Поэтому либо запускаем их последовательно на одном conn, либо используем пул (см. вариант 2).
-        # Здесь делаем последовательную выборку, а не gather на одном conn.
+        # 2) Последовательный сбор данных
         prompts_info = await fetch_prompts(conn, user_companychat)
         category = await fetch_category(conn, channel_id)
         products_full = await fetch_services(conn, channel_id)
@@ -60,25 +74,73 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
         first_dialog = await fetch_is_first_dialog(conn, user_companychat)
         masters_info = await fetch_masters_info(channel_id)
         user_info = await fetch_personal_info(user_id)
-        # user_records = await fetch_personal_records(user_companychat, channel_id)
+
+        now = datetime.now()
+        weekday_num, weekday_name = await get_weekday_info(now)
 
         data = {
             "user_id": user_id,
-            "date_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "date_time": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "weekday_num": weekday_num,
+            "weekday_name": weekday_name,
             **channel_info,
             "prompts_info": prompts_info,
             "category": category,
-            "products_full" : products_full,
+            "products_full": products_full,
             "probny": probny,
             "first_dialog": first_dialog,
             "user_info": user_info,
-            # "user_records": user_records,
             "masters_info": masters_info,
         }
+
         flat_data = flatten_dict_no_prefix(data)
         return {"data": flat_data}
+
     finally:
         await conn.close()
+
+
+
+# async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
+#     """Функция получения всех данных из Postgres."""
+#     conn = await asyncpg.connect(**POSTGRES_CONFIG)
+#     try:
+#         # 1) Канальный контекст
+#         channel_info = await fetch_channel_info(conn, user_companychat)
+#         channel_id = channel_info["channel_id"]
+#         session_id = channel_info["session_id"]
+#         user_id = channel_info["user_id"]
+
+#         # 2) Параллельный сбор зависимых данных
+#         # Важно: на одном соединении asyncpg нельзя выполнять несколько запросов одновременно.
+#         # Поэтому либо запускаем их последовательно на одном conn, либо используем пул (см. вариант 2).
+#         # Здесь делаем последовательную выборку, а не gather на одном conn.
+#         prompts_info = await fetch_prompts(conn, user_companychat)
+#         category = await fetch_category(conn, channel_id)
+#         products_full = await fetch_services(conn, channel_id)
+#         probny = await fetch_probny(conn, channel_id)
+#         first_dialog = await fetch_is_first_dialog(conn, user_companychat)
+#         masters_info = await fetch_masters_info(channel_id)
+#         user_info = await fetch_personal_info(user_id)
+#         # user_records = await fetch_personal_records(user_companychat, channel_id)
+
+#         data = {
+#             "user_id": user_id,
+#             "date_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+#             **channel_info,
+#             "prompts_info": prompts_info,
+#             "category": category,
+#             "products_full" : products_full,
+#             "probny": probny,
+#             "first_dialog": first_dialog,
+#             "user_info": user_info,
+#             # "user_records": user_records,
+#             "masters_info": masters_info,
+#         }
+#         flat_data = flatten_dict_no_prefix(data)
+#         return {"data": flat_data}
+#     finally:
+#         await conn.close()
 
 async def data_user_info(user_companychat: int) -> dict[str, Any]:
     """Функция получения данных о пользователе и компании из Postgres."""
