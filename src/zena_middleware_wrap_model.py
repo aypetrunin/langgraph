@@ -417,8 +417,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
             return model_4o_mini
 
         if mcp_port in self.CLASSIC_PORTS:
-            # return model_4o if dialog_state in ("new", "remember") else model_4o_mini
-            return model_4o_mini
+            return model_4o if dialog_state in ("postrecord") else model_4o_mini # "new", "remember"
 
         return model_4o_mini
 
