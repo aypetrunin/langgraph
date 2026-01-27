@@ -135,4 +135,4 @@ async def retry_async(
             # Неблокирующее ожидание — не мешает другим корутинам
             await asyncio.sleep(wait)
     # Этот raise теоретически невозможен, но для mypy необходим
-    raise RuntimeError("retry_async exhausted all retries without returning")
+    raise RuntimeError("retry_async исчерпал все попытки повтора без возврата")

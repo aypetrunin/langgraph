@@ -49,11 +49,16 @@ async def _run_template(
     """Общий шаблон: port_guard + parse + typecheck + truthy + on_ok.
     Возвращает tools_result (parsed), либо None.
     """
+    logger.info("_run_template")
+    logger.info(f"result: {result}")
+
     if not port_guard(request):
         return None
 
     tools_result = _parse_tool_content(result)
-
+    
+    logger.info(f"tools_result: {tools_result}")
+    
     if not isinstance(tools_result, expected_type):
         return None
     if require_truthy and not tools_result:
@@ -118,7 +123,8 @@ async def pp_available_time_for_master(result: ToolMessage, request: ToolCallReq
     def on_ok(data: dict, tools_result: list, request: ToolCallRequest) -> None:
         data.setdefault("available_time", [])
         data["available_time"].append(tools_result)
-        data["dialog_state"] = "available_time"
+        if not data["user_records"]:
+            data["dialog_state"] = "available_time"
 
     return await zena_default(request=request, result=result, expected_type=list, on_ok=on_ok)
 
@@ -138,8 +144,17 @@ async def pp_available_time_for_master_list(result: ToolMessage, request: ToolCa
 
 async def pp_record_time(result: ToolMessage, request: ToolCallRequest) -> Any:
     def on_ok(data: dict, tools_result: dict, request: ToolCallRequest) -> None:
+        logger.info("pp_record_time")
+        tool_args = request.tool_call.get("args")
+        logger.info(f"tool_args: {tool_args}")
+
         if tools_result.get("success"):
             data["dialog_state"] = "postrecord"
+            data["desired_date"] = tool_args.get("office_id")
+            data["desired_date"] = tool_args.get("date")
+            data["office_id"] = tool_args.get("office_id")
+            data["desired_master"] = {"master_id": tool_args.get("master_id")}
+            data["item_selected"] = [{"item_id": tool_args.get("product_id")}]
 
     return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
 
@@ -165,13 +180,17 @@ async def pp_recommendations(result: ToolMessage, request: ToolCallRequest) -> A
     )
 
 
-async def pp_record(result: ToolMessage, request: ToolCallRequest) -> Any:
+async def pp_records(result: ToolMessage, request: ToolCallRequest) -> Any:
     def on_ok(data: dict, tools_result: dict, request: ToolCallRequest) -> None:
+        logger.info("pp_records")
+        logger.info(f"tools_result: {tools_result}")
         if tools_result.get("success"):
             if not tools_result["data"]:
                 data["user_records"] = "У Вас нет записей на услуги."
             data["user_records"] = tools_result["data"]
+            logger.info(f"data['user_records']: {data['user_records']}")
     return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
+
 
 async def pp_record_delete(result: ToolMessage, request: ToolCallRequest) -> Any:
     def on_ok(data: dict, tools_result: dict, request: ToolCallRequest) -> None:
@@ -180,6 +199,16 @@ async def pp_record_delete(result: ToolMessage, request: ToolCallRequest) -> Any
             data["user_records"] = []
 
     return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
+
+
+async def pp_record_reschedule(result: ToolMessage, request: ToolCallRequest) -> Any:
+    def on_ok(data: dict, tools_result: dict, request: ToolCallRequest) -> None:
+        if tools_result.get("success"):
+            # после успешного переноса очищаем список так как он не актуален.
+            data["user_records"] = []
+
+    return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
+
 
 async def pp_remember_office(result: ToolMessage, request: ToolCallRequest) -> Any:
     def on_ok(data: dict, tools_result: dict, request: ToolCallRequest) -> None:
@@ -284,8 +313,9 @@ TOOL_POSTPROCESSORS_DEFAULT: dict[str, PostProcessor] = {
     "zena_remember_master":pp_remember_master,
     "zena_remember_desired_date": pp_remember_desired_date,
     "zena_remember_desired_time": pp_remember_desired_time,
-    "zena_record": pp_record,
+    "zena_records": pp_records,
     "zena_record_delete": pp_record_delete,
+    "zena_record_reschedule": pp_record_reschedule,
 }
 
 TOOL_POSTPROCESSORS_5007: dict[str, PostProcessor] = {
@@ -393,6 +423,7 @@ TOOL_POSTPROCESSORS_ALENA: dict[str, PostProcessor] = {
 
 
 def _get_registry_for_request(request: ToolCallRequest) -> dict[str, PostProcessor]:
+    logger.info("_get_registry_for_request")
     data = request.state.get("data") or {}
     port = data.get("mcp_port")
     if port in AVAILIABLE_PORT_ALENA:
@@ -419,6 +450,7 @@ class ToolMonitoringMiddleware(AgentMiddleware):
             logger.info("Tool completed successfully")
 
             registry = _get_registry_for_request(request)
+            logger.info(f"tool_name: {tool_name}")
             pp = registry.get(tool_name)
             pp_result = await pp(result, request) if pp else None
 

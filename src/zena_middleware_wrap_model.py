@@ -38,7 +38,7 @@ class DynamicSystemPrompt(AgentMiddleware):
         state = request.state or {}
         data = dict(state.get("data", {}) or {})
 
-        logger.info(f"data: {data}")
+        # logger.info(f"data: {data}")
 
         env_name = (os.getenv("ENV", "prod") or "prod").strip().lower()
         is_dev = env_name == "dev"
@@ -123,59 +123,72 @@ class DynamicSystemPrompt(AgentMiddleware):
 
 
 class ToolSelectorMiddleware(AgentMiddleware):
-    """Middleware для выбора релевантных инструментов по состоянию диалога + guards."""
+    """
+    Middleware: решает, какие инструменты (tools) доступны модели (LLM) на каждом шаге.
 
-    # ---------- FSM config ----------
+    Есть 2 независимые ветки логики:
+
+    A) "Классическая запись" (твоя старая логика через dialog_state):
+       - слоты мастера доступны только если есть office_id + desired_date
+       - запись (zena_record_time) доступна только если есть контакты + desired_time
+
+    B) "Управление существующими записями" (просмотр/отмена/перенос) через user_records:
+       - zena_records (просмотр) доступен всегда
+       - если user_records НЕ пустой:
+           * разрешаем zena_record_delete (отмена)
+           * разрешаем zena_avaliable_time_for_master (+ list) ТОЛЬКО если есть desired_date
+             (потому что чтобы искать слоты для переноса, нам нужна дата)
+           * разрешаем zena_record_reschedule ТОЛЬКО если выбраны desired_date И desired_time
+             (перенос "куда?" — нужна дата и время)
+       - если user_records пустой:
+           * запрещаем delete / reschedule / слоты переноса
+    """
+
+    # ====== FSM (для классической записи) ======
     ORDER = ["new", "selecting", "remember", "available_time", "postrecord"]
 
-    # Глобальные инструменты (доступны всегда, не меняют dialog_state)
+    # ====== ALWAYS AVAILABLE TOOLS ======
     GLOBAL_TOOLS: set[str] = {
         "zena_faq",
         "zena_services",
-        # remember tools (всегда доступны, т.к. клиент может назвать их где угодно)
+
+        # remember tools (могут понадобиться в любой момент)
         "zena_remember_office",
         "zena_remember_master",
         "zena_remember_desired_date",
         "zena_remember_desired_time",
-        # инструменты работы с записанными услугами
+
+        # просмотр записей клиента — всегда доступен
         "zena_records",
-        "zena_record_delete"
     }
 
-    # Stage tools для classic портов (400x/500x)
-    # ВАЖНО: используй ТОЧНЫЕ имена инструментов, как они зарегистрированы.
+    # ====== Stage tools for classic ports ======
     STAGE_TOOLS_CLASSIC: dict[str, set[str]] = {
         "new": {"zena_product_search"},
         "selecting": {
             "zena_product_search",
             "zena_remember_product_id",
-            "zena_remember_product_id_list",
         },
         "remember": {
             "zena_avaliable_time_for_master",
-            "zena_available_time_for_master_list",
         },
         "available_time": {
             "zena_record_time",
             "zena_avaliable_time_for_master",
-            "zena_available_time_for_master_list",
         },
-        "postrecord": {
-            "zena_recommendations"
-        },
+        "postrecord": {"zena_recommendations"},
     }
 
-    # postrecord override: жёстко только recommendations
     POSTRECORD_OVERRIDE: set[str] = {"zena_recommendations"}
 
-    # ---------- ports ----------
+    # ====== Ports ======
     CLASSIC_PORTS = {4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006, 5021, 4021}
     PORTS_4007_5007 = {4007, 5007}
     PORT_5020 = {5020}
 
-    # -------------------------
-    # Main selection
-    # -------------------------
+    # =========================================================================
+    # MAIN: select tools
+    # =========================================================================
     async def _select_relevant_tools(self, state: dict, tools: list[StructuredTool]) -> list[StructuredTool]:
         logger.info("===wrap_model_call===_select_relevant_tools===")
 
@@ -183,51 +196,51 @@ class ToolSelectorMiddleware(AgentMiddleware):
         mcp_port = data.get("mcp_port")
         dialog_state = (data.get("dialog_state") or "new").strip()
 
-        logger.info(f"dialog_state: {dialog_state}")
-        logger.info(f"mcp_port: {mcp_port}")
-        logger.info(f"all_tools: {[t.name for t in tools]}")
+        logger.info("dialog_state=%s", dialog_state)
+        logger.info("mcp_port=%s", mcp_port)
+        logger.info("all_tools=%s", [t.name for t in tools])
 
         allowed = self._build_allowed_tools(mcp_port=mcp_port, dialog_state=dialog_state, data=data)
-
         filtered = [tool for tool in tools if tool.name in allowed]
-        logger.info(f"allowed_tools: {sorted(allowed)}")
-        logger.info(f"tools_filtered: {[t.name for t in filtered]}")
+
+        logger.info("allowed_tools=%s", sorted(allowed))
+        logger.info("tools_filtered=%s", [t.name for t in filtered])
         return filtered
 
     def _build_allowed_tools(self, *, mcp_port: int | None, dialog_state: str, data: dict) -> set[str]:
-        # Всегда разрешаем globals (FAQ/Services/Remember*)
+        logger.info("_build_allowed_tools")
+        
         base = set(self.GLOBAL_TOOLS)
 
         if mcp_port is None:
-            return base
+            return self._apply_guards(dialog_state, base, data)
 
         if mcp_port in self.PORT_5020:
-            return self._allowed_for_5020(dialog_state, data, base)
+            allowed = self._allowed_for_5020(dialog_state, data, base)
+            return self._apply_guards(dialog_state, allowed, data)
 
         if mcp_port in self.PORTS_4007_5007:
-            return self._allowed_for_4007_5007(dialog_state, data, base)
+            allowed = self._allowed_for_4007_5007(dialog_state, data, base)
+            return self._apply_guards(dialog_state, allowed, data)
 
         if mcp_port in self.CLASSIC_PORTS:
-            return self._allowed_for_classic_ports(dialog_state, data, base)
+            allowed = self._allowed_for_classic_ports(dialog_state, data, base)
+            logger.info(f"allowed: {allowed}")
+            responce = self._apply_guards(dialog_state, allowed, data)
+            logger.info(f"responce _apply_guards: {responce}")
+            return responce
 
-        return base
+        return self._apply_guards(dialog_state, base, data)
 
-    # -------------------------
-    # Classic ports
-    # -------------------------
+    # =========================================================================
+    # Classic ports logic
+    # =========================================================================
     def _allowed_for_classic_ports(self, dialog_state: str, data: dict, base: set[str]) -> set[str]:
-        # postrecord override
         if dialog_state == "postrecord":
             return set(self.POSTRECORD_OVERRIDE)
 
         allowed = set(base)
-
-        # inherit_previous: stage tools всех стадий <= текущей
         allowed |= self._inherited_stage_tools(dialog_state, self.STAGE_TOOLS_CLASSIC)
-
-        # guards: фильтрация опасных инструментов
-        allowed = self._apply_guards(dialog_state, allowed, data)
-
         return allowed
 
     def _inherited_stage_tools(self, dialog_state: str, stage_map: dict[str, set[str]]) -> set[str]:
@@ -240,31 +253,97 @@ class ToolSelectorMiddleware(AgentMiddleware):
             out |= stage_map.get(st, set())
         return out
 
+    # =========================================================================
+    # GUARDS
+    # =========================================================================
     def _apply_guards(self, dialog_state: str, allowed: set[str], data: dict) -> set[str]:
         """
-        Guards по воронке:
-          - Слоты: только если есть office_id + desired_date
-          - Запись: только если есть consent + (name) + phone + email + desired_time
+        A) Classic funnel guards (твои правила записи)
+        B) Records management guards (просмотр/отмена/перенос)
+
+        ВАЖНО: в ветке B мы теперь контролируем BOTH desired_date и desired_time:
+          - слоты для переноса => нужен desired_date
+          - финальный перенос => нужны desired_date + desired_time
         """
-        # 1) Слоты не даём, пока не выбран филиал и дата
-        # (это актуально и на remember, и на available_time если пользователь меняет дату/офис)
+
+        logger.info(
+            "DEBUG keys: office_id=%r desired_date=%r date=%r",
+            data.get("office_id"), data.get("desired_date"), data.get("date")
+        )
+
+
+        # -----------------------------
+        # A) Classic funnel guards
+        # -----------------------------
         if dialog_state in ("remember", "available_time"):
+            # Без офиса и даты спрашивать слоты бессмысленно
             if not self._has_office_and_date(data):
+                logger.info("_has_office_and_date == False")
                 allowed.discard("zena_avaliable_time_for_master")
                 allowed.discard("zena_available_time_for_master_list")
 
-        # 2) Запись не даём без пакета данных + выбранного времени
         if dialog_state == "available_time":
+            # Без пакета контактов и выбранного времени "запись" не делаем
             if not self._has_contact_bundle(data) or not self._has_desired_time(data):
                 allowed.discard("zena_record_time")
 
+        # -----------------------------
+        # B) Existing records management via user_records
+        # -----------------------------
+        if self._has_user_records(data):
+            logger.info("Ветка В")
+            # 1) Отмена — доступна сразу, если есть записи
+            allowed.add("zena_record_delete")
+
+            # 2) Слоты для переноса — только если пользователь указал/выбрал desired_date
+            # (иначе "на какую дату искать новые слоты?" непонятно)
+            if self._has_desired_date(data):
+                allowed.add("zena_avaliable_time_for_master")
+                allowed.add("zena_available_time_for_master_list")
+                allowed.discard("zena_record_delete")
+            else:
+                allowed.discard("zena_avaliable_time_for_master")
+                allowed.discard("zena_available_time_for_master_list")
+
+            # 3) Финальный перенос — только если выбраны И дата, И время
+            if self._has_desired_date(data) and self._has_desired_time(data):
+                allowed.add("zena_record_reschedule")
+            else:
+                allowed.discard("zena_record_reschedule")
+        # else:
+        #     # Записей нет — отключаем ветку отмена/перенос
+        #     allowed.discard("zena_record_delete")
+        #     allowed.discard("zena_record_reschedule")
+        #     allowed.discard("zena_avaliable_time_for_master")
+        #     allowed.discard("zena_available_time_for_master_list")
+
         return allowed
+
+    # =========================================================================
+    # Helpers
+    # =========================================================================
+    @staticmethod
+    def _has_user_records(data: dict) -> bool:
+        recs = data.get("user_records")
+        return isinstance(recs, list) and len(recs) > 0
+
+    @staticmethod
+    def _has_desired_date(data: dict) -> bool:
+        """
+        desired_date — дата, на которую пользователь хочет перенести.
+        Обычно хранится как строка (например "2026-01-28" или "28.01.2026").
+        """
+        d = str(data.get("desired_date") or "").strip()
+        return bool(d)
 
     @staticmethod
     def _has_office_and_date(data: dict) -> bool:
+        logger.info("_has_office_and_date")
         office_id = str(data.get("office_id") or "").strip()
         desired_date = str(data.get("desired_date") or "").strip()
-        return bool(office_id and desired_date)
+        responce = bool(office_id and desired_date)
+        logger.info(f"responce: {responce}")
+        return responce
 
     @staticmethod
     def _has_desired_time(data: dict) -> bool:
@@ -281,9 +360,9 @@ class ToolSelectorMiddleware(AgentMiddleware):
         name_ok = bool(first or last)
         return bool(consent and name_ok and phone and email)
 
-    # -------------------------
-    # 4007/5007 (оставляем твою текущую логику, но добавляем globals + guards + override)
-    # -------------------------
+    # =========================================================================
+    # 4007/5007
+    # =========================================================================
     def _allowed_for_4007_5007(self, dialog_state: str, data: dict, base: set[str]) -> set[str]:
         if dialog_state == "postrecord":
             return {"zena_recommendations"}
@@ -300,20 +379,11 @@ class ToolSelectorMiddleware(AgentMiddleware):
             case _:
                 pass
 
-        # guards
-        if dialog_state in ("remember", "available_time"):
-            if not self._has_office_and_date(data):
-                allowed.discard("zena_avaliable_time_for_master_list")
-
-        if dialog_state == "available_time":
-            if not self._has_contact_bundle(data) or not self._has_desired_time(data):
-                allowed.discard("zena_record_time")
-
         return allowed
 
-    # -------------------------
-    # 5020 (Alena) — твоя логика + globals
-    # -------------------------
+    # =========================================================================
+    # 5020
+    # =========================================================================
     def _allowed_for_5020(self, dialog_state: str, data: dict, base: set[str]) -> set[str]:
         allowed = set(base)
 
@@ -322,7 +392,6 @@ class ToolSelectorMiddleware(AgentMiddleware):
         onboarding_stage = onboarding.get("onboarding_stage")
         onboarding_status = onboarding.get("onboarding_status")
 
-        # обычный режим диалога
         if (onboarding_status is None or onboarding_status is True) and phone:
             allowed.add("zena_get_client_statistics")
 
@@ -332,26 +401,23 @@ class ToolSelectorMiddleware(AgentMiddleware):
                 allowed.add("zena_remember_lesson_id")
             elif dialog_state == "remember":
                 allowed.add("zena_update_client_lesson")
-
-        # режим опроса
         else:
             if isinstance(onboarding_stage, int) and onboarding_stage >= 5:
                 allowed.add("zena_update_client_info")
 
         return allowed
 
-    # -------------------------
-    # Model selection (оставь свой импорт/логику, ниже заглушка)
-    # -------------------------
+    # =========================================================================
+    # Model selection
+    # =========================================================================
     async def _select_model(self, state: dict):
-
         data = state.get("data", {}) or {}
         mcp_port = data.get("mcp_port")
         dialog_state = (data.get("dialog_state") or "new").strip()
 
         if mcp_port in self.PORTS_4007_5007:
             return model_4o if dialog_state in ("new", "available_time") else model_4o_mini
- 
+
         if mcp_port in self.PORT_5020:
             return model_4o_mini
 
@@ -360,9 +426,9 @@ class ToolSelectorMiddleware(AgentMiddleware):
 
         return model_4o_mini
 
-    # -------------------------
+    # =========================================================================
     # Middleware entry
-    # -------------------------
+    # =========================================================================
     async def awrap_model_call(self, request, handler):
         logger.info("===wrap_model_call===ToolSelectorMiddleware===")
 
@@ -370,6 +436,258 @@ class ToolSelectorMiddleware(AgentMiddleware):
         request.model = await self._select_model(request.state)
 
         return await handler(request)
+
+
+
+# class ToolSelectorMiddleware(AgentMiddleware):
+#     """Middleware для выбора релевантных инструментов по состоянию диалога + guards."""
+
+#     # ---------- FSM config ----------
+#     ORDER = ["new", "selecting", "remember", "available_time", "postrecord"]
+
+#     # Глобальные инструменты (доступны всегда, не меняют dialog_state)
+#     GLOBAL_TOOLS: set[str] = {
+#         "zena_faq",
+#         "zena_services",
+#         # remember tools (всегда доступны, т.к. клиент может назвать их где угодно)
+#         "zena_remember_office",
+#         "zena_remember_master",
+#         "zena_remember_desired_date",
+#         "zena_remember_desired_time",
+#         # инструменты работы с записанными услугами
+#         "zena_records",
+#         "zena_record_delete",
+#         "zena_record_reschedule"
+#     }
+
+#     # Stage tools для classic портов (400x/500x)
+#     # ВАЖНО: используй ТОЧНЫЕ имена инструментов, как они зарегистрированы.
+#     STAGE_TOOLS_CLASSIC: dict[str, set[str]] = {
+#         "new": {"zena_product_search"},
+#         "selecting": {
+#             "zena_product_search",
+#             "zena_remember_product_id",
+#             "zena_remember_product_id_list",
+#         },
+#         "remember": {
+#             "zena_avaliable_time_for_master",
+#             "zena_available_time_for_master_list",
+#         },
+#         "available_time": {
+#             "zena_record_time",
+#             "zena_avaliable_time_for_master",
+#             "zena_available_time_for_master_list",
+#         },
+#         "postrecord": {
+#             "zena_recommendations"
+#         },
+#     }
+
+#     # postrecord override: жёстко только recommendations
+#     POSTRECORD_OVERRIDE: set[str] = {"zena_recommendations"}
+
+#     # ---------- ports ----------
+#     CLASSIC_PORTS = {4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006, 5021, 4021}
+#     PORTS_4007_5007 = {4007, 5007}
+#     PORT_5020 = {5020}
+
+#     # -------------------------
+#     # Main selection
+#     # -------------------------
+#     async def _select_relevant_tools(self, state: dict, tools: list[StructuredTool]) -> list[StructuredTool]:
+#         logger.info("===wrap_model_call===_select_relevant_tools===")
+
+#         data = state.get("data", {}) or {}
+#         mcp_port = data.get("mcp_port")
+#         dialog_state = (data.get("dialog_state") or "new").strip()
+
+#         logger.info(f"dialog_state: {dialog_state}")
+#         logger.info(f"mcp_port: {mcp_port}")
+#         logger.info(f"all_tools: {[t.name for t in tools]}")
+
+#         allowed = self._build_allowed_tools(mcp_port=mcp_port, dialog_state=dialog_state, data=data)
+
+#         filtered = [tool for tool in tools if tool.name in allowed]
+#         logger.info(f"allowed_tools: {sorted(allowed)}")
+#         logger.info(f"tools_filtered: {[t.name for t in filtered]}")
+#         return filtered
+
+#     def _build_allowed_tools(self, *, mcp_port: int | None, dialog_state: str, data: dict) -> set[str]:
+#         # Всегда разрешаем globals (FAQ/Services/Remember*)
+#         base = set(self.GLOBAL_TOOLS)
+
+#         if mcp_port is None:
+#             return base
+
+#         if mcp_port in self.PORT_5020:
+#             return self._allowed_for_5020(dialog_state, data, base)
+
+#         if mcp_port in self.PORTS_4007_5007:
+#             return self._allowed_for_4007_5007(dialog_state, data, base)
+
+#         if mcp_port in self.CLASSIC_PORTS:
+#             return self._allowed_for_classic_ports(dialog_state, data, base)
+
+#         return base
+
+#     # -------------------------
+#     # Classic ports
+#     # -------------------------
+#     def _allowed_for_classic_ports(self, dialog_state: str, data: dict, base: set[str]) -> set[str]:
+#         # postrecord override
+#         if dialog_state == "postrecord":
+#             return set(self.POSTRECORD_OVERRIDE)
+
+#         allowed = set(base)
+
+#         # inherit_previous: stage tools всех стадий <= текущей
+#         allowed |= self._inherited_stage_tools(dialog_state, self.STAGE_TOOLS_CLASSIC)
+
+#         # guards: фильтрация опасных инструментов
+#         allowed = self._apply_guards(dialog_state, allowed, data)
+
+#         return allowed
+
+#     def _inherited_stage_tools(self, dialog_state: str, stage_map: dict[str, set[str]]) -> set[str]:
+#         if dialog_state not in self.ORDER:
+#             dialog_state = "new"
+#         idx = self.ORDER.index(dialog_state)
+
+#         out: set[str] = set()
+#         for st in self.ORDER[: idx + 1]:
+#             out |= stage_map.get(st, set())
+#         return out
+
+#     def _apply_guards(self, dialog_state: str, allowed: set[str], data: dict) -> set[str]:
+#         """
+#         Guards по воронке:
+#           - Слоты: только если есть office_id + desired_date
+#           - Запись: только если есть consent + (name) + phone + email + desired_time
+#         """
+#         # 1) Слоты не даём, пока не выбран филиал и дата
+#         # (это актуально и на remember, и на available_time если пользователь меняет дату/офис)
+#         if dialog_state in ("remember", "available_time"):
+#             if not self._has_office_and_date(data):
+#                 allowed.discard("zena_avaliable_time_for_master")
+#                 allowed.discard("zena_available_time_for_master_list")
+
+#         # 2) Запись не даём без пакета данных + выбранного времени
+#         if dialog_state == "available_time":
+#             if not self._has_contact_bundle(data) or not self._has_desired_time(data):
+#                 allowed.discard("zena_record_time")
+
+#         return allowed
+
+#     @staticmethod
+#     def _has_office_and_date(data: dict) -> bool:
+#         office_id = str(data.get("office_id") or "").strip()
+#         desired_date = str(data.get("desired_date") or "").strip()
+#         return bool(office_id and desired_date)
+
+#     @staticmethod
+#     def _has_desired_time(data: dict) -> bool:
+#         t = str(data.get("desired_time") or "").strip()
+#         return bool(t)
+
+#     @staticmethod
+#     def _has_contact_bundle(data: dict) -> bool:
+#         consent = bool(data.get("consent"))
+#         phone = str(data.get("phone") or "").strip()
+#         email = str(data.get("email") or "").strip()
+#         first = str(data.get("first_name") or "").strip()
+#         last = str(data.get("last_name") or "").strip()
+#         name_ok = bool(first or last)
+#         return bool(consent and name_ok and phone and email)
+
+#     # -------------------------
+#     # 4007/5007 (оставляем твою текущую логику, но добавляем globals + guards + override)
+#     # -------------------------
+#     def _allowed_for_4007_5007(self, dialog_state: str, data: dict, base: set[str]) -> set[str]:
+#         if dialog_state == "postrecord":
+#             return {"zena_recommendations"}
+
+#         allowed = set(base)
+
+#         match dialog_state:
+#             case "new":
+#                 allowed.add("zena_record_product_id_list")
+#             case "remember":
+#                 allowed |= {"zena_remember_product_id_list", "zena_avaliable_time_for_master_list"}
+#             case "available_time":
+#                 allowed |= {"zena_remember_product_id_list", "zena_avaliable_time_for_master_list", "zena_record_time"}
+#             case _:
+#                 pass
+
+#         # guards
+#         if dialog_state in ("remember", "available_time"):
+#             if not self._has_office_and_date(data):
+#                 allowed.discard("zena_avaliable_time_for_master_list")
+
+#         if dialog_state == "available_time":
+#             if not self._has_contact_bundle(data) or not self._has_desired_time(data):
+#                 allowed.discard("zena_record_time")
+
+#         return allowed
+
+#     # -------------------------
+#     # 5020 (Alena) — твоя логика + globals
+#     # -------------------------
+#     def _allowed_for_5020(self, dialog_state: str, data: dict, base: set[str]) -> set[str]:
+#         allowed = set(base)
+
+#         phone = str(data.get("phone") or "").strip()
+#         onboarding = data.get("onboarding") or {}
+#         onboarding_stage = onboarding.get("onboarding_stage")
+#         onboarding_status = onboarding.get("onboarding_status")
+
+#         # обычный режим диалога
+#         if (onboarding_status is None or onboarding_status is True) and phone:
+#             allowed.add("zena_get_client_statistics")
+
+#             if dialog_state == "new":
+#                 allowed.add("zena_get_client_lessons")
+#             elif dialog_state == "selecting":
+#                 allowed.add("zena_remember_lesson_id")
+#             elif dialog_state == "remember":
+#                 allowed.add("zena_update_client_lesson")
+
+#         # режим опроса
+#         else:
+#             if isinstance(onboarding_stage, int) and onboarding_stage >= 5:
+#                 allowed.add("zena_update_client_info")
+
+#         return allowed
+
+#     # -------------------------
+#     # Model selection (оставь свой импорт/логику, ниже заглушка)
+#     # -------------------------
+#     async def _select_model(self, state: dict):
+
+#         data = state.get("data", {}) or {}
+#         mcp_port = data.get("mcp_port")
+#         dialog_state = (data.get("dialog_state") or "new").strip()
+
+#         if mcp_port in self.PORTS_4007_5007:
+#             return model_4o if dialog_state in ("new", "available_time") else model_4o_mini
+ 
+#         if mcp_port in self.PORT_5020:
+#             return model_4o_mini
+
+#         if mcp_port in self.CLASSIC_PORTS:
+#             return model_4o if dialog_state in ("new", "remember", "postrecord") else model_4o_mini
+
+#         return model_4o_mini
+
+#     # -------------------------
+#     # Middleware entry
+#     # -------------------------
+#     async def awrap_model_call(self, request, handler):
+#         logger.info("===wrap_model_call===ToolSelectorMiddleware===")
+
+#         request.tools = await self._select_relevant_tools(request.state, request.tools)
+#         request.model = await self._select_model(request.state)
+
+#         return await handler(request)
 
 
 

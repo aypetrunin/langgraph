@@ -116,7 +116,7 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
                 model_4o_mini_reserv,
             ),
             ToolCallLimitMiddleware(
-                run_limit=5,
+                run_limit=10,
             )
             # PIIMiddleware(
             #     "phone",
