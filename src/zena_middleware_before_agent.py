@@ -135,8 +135,10 @@ class GetDatabaseMiddleware(AgentMiddleware):
             logger.info("===GetDatabaseMiddleware===")
 
             ctx = runtime.context or {}
+            access_token = ctx.get("_access_token")
             user_companychat = ctx.get("_user_companychat")
-            
+            reply_to_history_id = ctx.get("_reply_to_history_id")
+
             gathered = await data_collection_postgres(user_companychat)
             if not isinstance(gathered, dict):
                 raise TypeError(f"data_collection_postgres returned {type(gathered)!r}, expected dict")
@@ -151,6 +153,8 @@ class GetDatabaseMiddleware(AgentMiddleware):
             data["dialog_state"] = dialog_state
             data["dialog_state_in"] = dialog_state
             data["user_companychat"] = user_companychat
+            data["reply_to_history_id"] = reply_to_history_id
+            data["access_token"] = access_token
 
             # дефолты для списковых ключей
             for key in self._LIST_DEFAULT_KEYS:

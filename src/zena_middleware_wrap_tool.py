@@ -168,16 +168,34 @@ async def pp_recommendations(result: ToolMessage, request: ToolCallRequest) -> A
                 "item_selected": [],
                 "available_time": [],
                 "available_sequences": [],
+                "user_records": [],
+                "office_id": None,
+                "desired_date": None,
+                "desired_time": None,
+                "desired_master": None,
             }
         )
 
-    return await zena_default(
-        request=request,
-        result=result,
-        expected_type=(list, dict, str),
-        on_ok=on_ok,
-        require_truthy=False,
-    )
+    return await zena_default(request=request, result=result, expected_type=(list, dict, str), on_ok=on_ok, require_truthy=False)
+
+async def pp_call_administrator(result: ToolMessage, request: ToolCallRequest) -> Any:
+    def on_ok(data: dict, tools_result: dict, request: ToolCallRequest) -> None:
+        if tools_result.get("success"):
+            data.update(
+                {
+                    "dialog_state": "new",
+                    "items_search": [],
+                    "item_selected": [],
+                    "available_time": [],
+                    "available_sequences": [],
+                    "user_records": [],
+                    "office_id": None,
+                    "desired_date": None,
+                    "desired_time": None,
+                    "desired_master": None,
+                }
+            )
+    return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
 
 
 async def pp_records(result: ToolMessage, request: ToolCallRequest) -> Any:
@@ -316,6 +334,7 @@ TOOL_POSTPROCESSORS_DEFAULT: dict[str, PostProcessor] = {
     "zena_records": pp_records,
     "zena_record_delete": pp_record_delete,
     "zena_record_reschedule": pp_record_reschedule,
+    "zena_call_administrator": pp_call_administrator,
 }
 
 TOOL_POSTPROCESSORS_5007: dict[str, PostProcessor] = {

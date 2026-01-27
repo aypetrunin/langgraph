@@ -160,6 +160,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
 
         # просмотр записей клиента — всегда доступен
         "zena_records",
+        "zena_call_administrator",
     }
 
     # ====== Stage tools for classic ports ======
