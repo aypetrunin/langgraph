@@ -10,6 +10,7 @@
     "agent_zena_anastasia": "src.zena_create_graph:graph_anastasia",
     "agent_zena_alena": "src.zena_create_graph:graph_alena",
     "agent_zena_valentina": "src.zena_create_graph:graph_valentina",
+    "agent_zena_marina": "src.zena_create_graph:graph_marina",
     "agent_zena_redialog": "src.zena_redialog_graph:graph_agent_redialog"
   },
   "env": "../deploy/dev.env",

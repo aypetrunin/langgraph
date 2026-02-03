@@ -8,8 +8,8 @@ from langchain.agents.middleware import AgentMiddleware
 
 from .zena_common import logger, _content_to_text
 
-AVAILIABLE_PORT_ALENA = {5020}
-AVAILIABLE_PORT_DEFAULT = {4001, 5001, 4002, 5002, 4005, 5005, 4006, 5006, 4007, 5007, 5021, 4021}
+AVAILIABLE_PORT_ALENA = {15020, 5020}
+AVAILIABLE_PORT_DEFAULT = {15001, 5001, 5002, 15002, 15005, 5005, 15006, 5006, 15021, 5021, 15024, 5024}
 
 
 PostProcessor = Callable[[ToolMessage, ToolCallRequest], Awaitable[Any]]
