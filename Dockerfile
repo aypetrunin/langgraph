@@ -21,7 +21,8 @@ ENV LANGSERVE_GRAPHS='{ \
     "agent_zena_annitta": "src.zena_create_graph:graph_annitta", \
     "agent_zena_anastasia": "src.zena_create_graph:graph_anastasia", \
     "agent_zena_alena": "src.zena_create_graph:graph_alena", \
-    "agent_zena_valentina": "src.zena_create_graph:graph_valentina" \
+    "agent_zena_valentina": "src.zena_create_graph:graph_valentina", \
+    "agent_zena_redialog": "src.zena_redialog_graph:graph_agent_redialog" \
 }'
 
 ENV IS_DOCKER=1
