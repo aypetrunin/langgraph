@@ -15,7 +15,6 @@ RUN for dep in /deps/*; do \
 
 # ========== ENV-переменные для Langserve =============
 ENV LANGSERVE_GRAPHS='{ \
-    "agent_zena_alisa": "src.zena_create_graph:graph_alisa", \
     "agent_zena_sofia": "src.zena_create_graph:graph_sofia", \
     "agent_zena_anisa": "src.zena_create_graph:graph_anisa", \
     "agent_zena_annitta": "src.zena_create_graph:graph_annitta", \

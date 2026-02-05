@@ -27,7 +27,6 @@ async def create_agent_graph(port: int):
     return workflow.compile()
 
 
-MCP_PORT_ALISA = os.getenv("MCP_PORT_ALISA") # 5001 / 15001
 MCP_PORT_SOFIA = os.getenv("MCP_PORT_SOFIA") # 5002 / 15002
 MCP_PORT_ANISA = os.getenv("MCP_PORT_ANISA") # 5005 / 15005
 MCP_PORT_ANNITTA = os.getenv("MCP_PORT_ANNITTA") # 5006 / 15006
@@ -37,7 +36,6 @@ MCP_PORT_VALENTINA = os.getenv("MCP_PORT_VALENTINA") # 5021 / 15021
 MCP_PORT_MARINA = os.getenv("MCP_PORT_MARINA") # 5024 / 15024
 
 
-graph_alisa = asyncio.run(create_agent_graph(MCP_PORT_ALISA))
 graph_sofia = asyncio.run(create_agent_graph(MCP_PORT_SOFIA))
 graph_anisa = asyncio.run(create_agent_graph(MCP_PORT_ANISA))
 graph_annitta = asyncio.run(create_agent_graph(MCP_PORT_ANNITTA))
