@@ -203,10 +203,13 @@ async def pp_records(result: ToolMessage, request: ToolCallRequest) -> Any:
         logger.info("pp_records")
         logger.info(f"tools_result: {tools_result}")
         if tools_result.get("success"):
-            if not tools_result["data"]:
+            if tools_result["data"]:
+                data["user_records"] = tools_result["data"]
+                data["desired_date"] = None
+                data["desired_time"] = None
+            else:
                 data["user_records"] = "У Вас нет записей на услуги."
-            data["user_records"] = tools_result["data"]
-            logger.info(f"data['user_records']: {data['user_records']}")
+        logger.info(f"data['user_records']: {data['user_records']}")
     return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
 
 
@@ -215,7 +218,8 @@ async def pp_record_delete(result: ToolMessage, request: ToolCallRequest) -> Any
         if tools_result.get("success"):
             # после успешного удаления очищаем список так как он не актуален.
             data["user_records"] = []
-
+            data["desired_date"] = None
+            data["desired_time"] = None
     return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
 
 
@@ -224,7 +228,8 @@ async def pp_record_reschedule(result: ToolMessage, request: ToolCallRequest) ->
         if tools_result.get("success"):
             # после успешного переноса очищаем список так как он не актуален.
             data["user_records"] = []
-
+            data["desired_date"] = None
+            data["desired_time"] = None
     return await zena_default(request=request, result=result, expected_type=dict, on_ok=on_ok)
 
 
