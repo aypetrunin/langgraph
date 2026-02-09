@@ -16,6 +16,7 @@ from langchain.tools.tool_node import ToolCallRequest
 from langchain.agents.middleware import AgentMiddleware
 
 from .zena_common import logger, _content_to_text
+from .mcp.registry import resolve_backend_name, MCP_BACKEND_ALENA_5020, MCP_BACKEND_LIST_5007
 
 AVAILIABLE_PORT_ALENA = {15020, 5020}
 AVAILIABLE_PORT_DEFAULT = {15001, 5001, 5002, 15002, 15005, 5005, 15006, 5006, 15021, 5021, 15024, 5024, 15017, 5017}
@@ -572,10 +573,14 @@ TOOL_POSTPROCESSORS_ALENA: dict[str, PostProcessor] = {
 
 def _get_registry_for_request(request: ToolCallRequest) -> dict[str, PostProcessor]:
     data = request.state.get("data") or {}
-    port = data.get("mcp_port")
-    if port in AVAILIABLE_PORT_ALENA:
+    backend = resolve_backend_name(data.get("mcp_port"))
+
+    if backend == MCP_BACKEND_ALENA_5020:
         return TOOL_POSTPROCESSORS_ALENA
+    if backend == MCP_BACKEND_LIST_5007:
+        return TOOL_POSTPROCESSORS_5007
     return TOOL_POSTPROCESSORS_DEFAULT
+
 
 
 class ToolMonitoringMiddleware(AgentMiddleware):
@@ -608,11 +613,6 @@ class ToolMonitoringMiddleware(AgentMiddleware):
             )
 
             registry = _get_registry_for_request(request)
-
-            # если реально есть особый реестр под 5007 — оставляем
-            data_state = request.state.get("data") or {}
-            if data_state.get("mcp_port") == 5007:
-                registry = TOOL_POSTPROCESSORS_5007
 
             pp = registry.get(tool_name)
             pp_result = await pp(env, request) if pp else None

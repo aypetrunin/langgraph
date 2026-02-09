@@ -1,13 +1,28 @@
+# src/zena_redialog_agent.py
+"""
+Агент реанимации диалога (Redialog).
 
-from langchain.agents.middleware.types import AgentState
+Важно:
+- НЕ создаём агента на import-time.
+- Модели берём через zena_models.get_models(), но только после init_resources(),
+  чтобы init_models() и http clients были подняты корректно.
+- Возвращаем готового агента через async-фабрику с кешированием на процесс.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Optional
+
 from langchain.agents import create_agent
+from langchain.agents.middleware.types import AgentState
+from langgraph.graph.state import CompiledStateGraph
 
-from .zena_common import model_4o_mini
+from .zena_resources import init_resources
+from .zena_models import get_models
 
-agent_redialog = create_agent( 
-    model=model_4o_mini,
-    state_schema=AgentState,
-    system_prompt="""
+
+_SYSTEM_PROMPT = """
 Ты — агент реанимации диалога.
 
 Твоя задача:
@@ -43,5 +58,37 @@ agent_redialog = create_agent(
 Обычный текст.
 Только вопрос.
 Без лишних символов.
-"""
-)
+""".strip()
+
+
+_lock = asyncio.Lock()
+_agent_redialog: Optional[CompiledStateGraph] = None
+
+
+async def get_agent_redialog() -> CompiledStateGraph:
+    """
+    Ленивая (и безопасная) инициализация агента на процесс.
+
+    Контракт:
+    - возвращает CompiledStateGraph (подграф/агент),
+    - кешируется на процесс,
+    - безопасно при конкурентных вызовах.
+    """
+    global _agent_redialog
+    if _agent_redialog is not None:
+        return _agent_redialog
+
+    async with _lock:
+        if _agent_redialog is not None:
+            return _agent_redialog
+
+        # гарантируем поднятие ресурсов + моделей
+        await init_resources()
+        models = get_models()
+
+        _agent_redialog = create_agent(
+            model=models.model_4o_mini,
+            state_schema=AgentState,
+            system_prompt=_SYSTEM_PROMPT,
+        )
+        return _agent_redialog

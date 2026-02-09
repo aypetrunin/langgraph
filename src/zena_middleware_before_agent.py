@@ -1,3 +1,5 @@
+# zena_middleware_before_agent.py
+
 """Middleware before agent."""
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from .zena_postgres import (
     fetch_key_words,
 )
 from .zena_requests import fetch_personal_info, fetch_crm_go_client_info
+from .mcp.registry import resolve_backend_name, MCP_BACKEND_ALENA_5020
 
 # Список сообщений из httpservice на запрещенные темы.
 # которые передаем клиенту через бота.
@@ -163,7 +166,8 @@ class GetDatabaseMiddleware(AgentMiddleware):
             mcp_port = data.get("mcp_port")
             logger.info("mcp_port=%s", mcp_port)
 
-            if mcp_port == 5020:
+            backend = resolve_backend_name(mcp_port)
+            if backend == MCP_BACKEND_ALENA_5020:
                 # Режим опроса клиента.
                 onboarding_from_state = state_data.get("onboarding")
                 if onboarding_from_state is not None:
@@ -245,7 +249,7 @@ class GetKeyWordMiddleware(AgentMiddleware):
 class GetCRMGOMiddleware(AgentMiddleware):
     """Middleware реализует функцию чтения данных из CRM GO."""
 
-    ALLOWED_PORT = [5020]
+    ALLOWED_BACKENDS = {MCP_BACKEND_ALENA_5020}
 
     @hook_config(can_jump_to=["end"])
     async def abefore_agent(
@@ -262,8 +266,8 @@ class GetCRMGOMiddleware(AgentMiddleware):
             phone = data.get("phone")
             mcp_port = data.get("mcp_port")
 
-            # Ранний возврат для нецелевого порта
-            if mcp_port not in self.ALLOWED_PORT:
+            backend = resolve_backend_name(mcp_port)
+            if backend not in self.ALLOWED_BACKENDS:
                 data.setdefault("onboarding", {}).setdefault("onboarding", True)
                 return {"data": data}
             

@@ -1,122 +1,73 @@
-"""Модуль реализует общие функции."""
+# zena_common.py
+"""Общие утилиты без сайд-эффектов на import-time."""
 
-import os
 import asyncio
 import inspect
 import logging
 import random
-import httpx
-
 from functools import wraps
-from pathlib import Path
-from dotenv import load_dotenv
-from typing_extensions import Any, Awaitable, Callable, TypeVar
-
-from langchain.chat_models import init_chat_model
-
+from typing import Awaitable, Callable, TypeVar, Any
 
 T = TypeVar("T")
 
-# -------------------- Logging --------------------
-# Настройка логирования для вывода сообщений в консоль
-logging.basicConfig(
-    level=logging.INFO,  # минимальный уровень логирования INFO
-    format="%(asctime)s [%(levelname)s] %(message)s",  # формат: время [уровень] сообщение
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)  # создаём логгер для текущего модуля
+logger = logging.getLogger(__name__)
 
 
-if not os.getenv("IS_DOCKER"):
-    ROOT = Path(__file__).resolve().parents[3]
-    dotenv_path = ROOT / "deploy" / "dev.env"
-    load_dotenv(dotenv_path=dotenv_path)
-
-openai_proxy = os.getenv("OPENAI_PROXY_URL")
-openai_model_4o_mini = os.getenv("OPENAI_MODEL_4O_MINI")
-openai_model_4o = os.getenv("OPENAI_MODEL_4O")
-openai_api_key = os.getenv("OPENAI_API_KEY")
-openai_api_key_reserv = os.getenv("OPENAI_API_KEY_RESERV")
-
-model_4o_mini = init_chat_model(
-    model=openai_model_4o_mini,
-    api_key=openai_api_key,
-    temperature=0,
-    http_async_client=httpx.AsyncClient(
-        proxy=openai_proxy,
-        timeout=60.0
-    ),
-)
-
-model_4o_mini_reserv = init_chat_model(
-    model=openai_model_4o_mini,
-    api_key=openai_api_key_reserv,
-    temperature=0,
-    http_async_client=httpx.AsyncClient(
-        proxy=openai_proxy,
-        timeout=60.0
-    ),
-)
-
-
-model_4o = init_chat_model(
-    model=openai_model_4o,
-    api_key=openai_api_key,
-    temperature=0,
-    http_async_client=httpx.AsyncClient(
-        proxy=openai_proxy,
-        timeout=60.0
-    ),
-)
-
-
-# -------------------- Декоратор Retry helper --------------------
 def retry_async(
     retries: int = 3,
-    backoff: float = 2.0,
-    jitter: float = 1.0,
-    exceptions: tuple[type[Exception], ...] = (Exception,),
-) -> Any:
-    """Декоратор для асинхронных ретраев с экспоненциальным бэкоффом и равномерным джиттером.
+    base_delay: float = 0.5,
+    backoff_factor: float = 2.0,
+    jitter: float = 0.3,
+    exceptions: tuple[type[Exception], ...] = (TimeoutError, ConnectionError),
+) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
+    """
+    Декоратор асинхронных ретраев с экспоненциальным backoff и jitter.
 
-    Args:
-        retries: общее число попыток (по умолчанию 3)
-        backoff: базовый коэффициент экспоненты (например, 2.0 => 2^attempt)
-        jitter: амплитуда добавочного шума [0, jitter)
-        exceptions: кортеж типов исключений, которые нужно ретраить
+    Важно:
+    - CancelledError НЕ ретраим (нужно для корректного shutdown/timeout).
+    - По умолчанию ретраим только сетевые/временные исключения.
+      Если нужно ретраить конкретные ошибки SDK/HTTP — передайте exceptions явно.
 
-    Example:
-        @retry_async()
-        async def fetch_data(conn, user_id):
-            return await conn.fetchrow(...)
-
-        @retry_async(retries=5, backoff=1.5, exceptions=(asyncpg.TimeoutError,))
-        async def fetch_critical_data(conn, user_id):
-            return await conn.fetchrow(...)
+    delay = base_delay * (backoff_factor ** (attempt-1)) + uniform(0, jitter)
     """
 
     def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> T:
+            last_exc: Exception | None = None
+
             for attempt in range(1, retries + 1):
                 try:
                     return await func(*args, **kwargs)
+                except asyncio.CancelledError:
+                    raise
                 except exceptions as e:
-                    if attempt == retries:
+                    last_exc = e
+                    if attempt >= retries:
                         logger.exception(
-                            f"Последняя неудачная попытка {func.__name__}: {e}"
+                            "Retry exhausted in %s (attempt %s/%s): %s",
+                            func.__name__,
+                            attempt,
+                            retries,
+                            type(e).__name__,
                         )
                         raise
-                    wait = (backoff**attempt) + random.uniform(0, jitter)
-                    logger.warning(
-                        f"Ошибка в {func.__name__}: {e} | "
-                        f"попытка {attempt}/{retries} — повтор через {wait:.1f}s"
+
+                    wait = base_delay * (backoff_factor ** (attempt - 1)) + random.uniform(
+                        0, jitter
                     )
-                    # Неблокирующее ожидание — не мешает другим корутинам
+                    logger.warning(
+                        "Error in %s: %s | attempt %s/%s -> sleep %.2fs",
+                        func.__name__,
+                        type(e).__name__,
+                        attempt,
+                        retries,
+                        wait,
+                    )
                     await asyncio.sleep(wait)
 
-            # Эта строка никогда не должна быть достигнута
-            raise RuntimeError(f"{func.__name__}: исчерпаны все попытки")
+            # теоретически не достижимо
+            raise RuntimeError(f"{func.__name__}: retries exhausted") from last_exc
 
         return wrapper
 
@@ -124,32 +75,34 @@ def retry_async(
 
 
 def _func_name(depth: int = 0) -> str:
-    # depth=0 — текущая, 1 — вызывающая, 2 — её вызывающая
+    """Имя функции в стеке (для отладочных логов). depth=0 текущая, 1 — вызывающая и т.д."""
     frame = inspect.currentframe()
     for _ in range(depth + 1):
         if frame is None:
             return "<unknown>"
         frame = frame.f_back
-    if frame is None:
-        return "<unknown>"
-    return frame.f_code.co_name
+    return "<unknown>" if frame is None else frame.f_code.co_name
 
 
 def _content_to_text(content: str | list[Any] | None) -> str:
-    """Функция получения сообщения.
-
-    Функция возвращает content из HumanMessages в зависимости от того
-    где оно было сформировано Langgraph Studio в закладке Chat или Graph.
-    Особенность Langgraph Studio.
     """
-    # logger.info("_content_to_text")
+    Приведение контента HumanMessage в текст.
+    LangGraph Studio иногда кладёт content как список частей.
+    """
     if isinstance(content, str):
         return content
+
     if isinstance(content, list) and content:
-        part = content[0]
-        if isinstance(part, dict):
-            if "text" in part and isinstance(part["text"], str):
-                return part["text"]
-            if "content" in part and isinstance(part["content"], str):
-                return part["content"]
+        chunks: list[str] = []
+        for part in content:
+            if isinstance(part, dict):
+                txt = part.get("text")
+                if isinstance(txt, str) and txt:
+                    chunks.append(txt)
+                    continue
+                cnt = part.get("content")
+                if isinstance(cnt, str) and cnt:
+                    chunks.append(cnt)
+        return "\n".join(chunks).strip()
+
     return ""

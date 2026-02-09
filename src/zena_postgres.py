@@ -1,31 +1,47 @@
-"""Модуль реализует функции обращения к Postgres."""
+# src/zena_postgres.py
+"""Модуль реализует функции обращения к Postgres (через shared pg_pool)."""
 
-import json
+from __future__ import annotations
+
 import os
 from datetime import datetime
+from pathlib import Path
+from contextlib import asynccontextmanager
+from typing_extensions import Any, Dict, List, Iterable
+from typing import AsyncIterator
+
+import asyncpg
+from .zena_resources import get_resources
+
 
 import asyncpg
 from dotenv import load_dotenv
-from pathlib import Path
-from typing_extensions import Any, Dict, List, Iterable
 
 from .zena_common import logger, retry_async
 from .zena_requests import fetch_personal_info, fetch_personal_records
 from .zena_request_masters_cache import fetch_masters_info
 
+# ✅ новый импорт: shared resources
+from .zena_resources import get_resources
+
+# ---------------------------------------------------------------------
+# local .env (как у тебя было)
+# ---------------------------------------------------------------------
 if not os.getenv("IS_DOCKER"):
     ROOT = Path(__file__).resolve().parents[3]
     dotenv_path = ROOT / "deploy" / "dev.env"
     load_dotenv(dotenv_path=dotenv_path)
 
 
-POSTGRES_CONFIG = {
-    "user": os.getenv("POSTGRES_USER"),
-    "password": os.getenv("POSTGRES_PASSWORD"),
-    "database": os.getenv("POSTGRES_DB"),
-    "host": os.getenv("POSTGRES_HOST"),
-    "port": os.getenv("POSTGRES_PORT"),
-}
+# ---------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------
+@asynccontextmanager
+async def pg_conn() -> AsyncIterator[asyncpg.Connection]:
+    res = await get_resources()
+    async with res.pg_pool.acquire() as conn:
+        yield conn
+
 
 async def get_weekday_info(dt: datetime | None = None) -> tuple[int, str]:
     """Асинхронно возвращает номер и название дня недели."""
@@ -48,7 +64,7 @@ async def get_weekday_info(dt: datetime | None = None) -> tuple[int, str]:
 
 def flatten_dict_no_prefix(d: dict[str, Any]) -> dict[str, Any]:
     """Функция получения плоского словаря."""
-    items = {}
+    items: dict[str, Any] = {}
     for key, value in d.items():
         if isinstance(value, dict):
             items.update(flatten_dict_no_prefix(value))
@@ -56,22 +72,26 @@ def flatten_dict_no_prefix(d: dict[str, Any]) -> dict[str, Any]:
             items[key] = value
     return items
 
+
+# ---------------------------------------------------------------------
+# main collectors
+# ---------------------------------------------------------------------
 async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
-    """Функция получения всех данных из Postgres."""
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
+    """Функция получения всех данных из Postgres (через pool)."""
+    async with pg_conn() as conn:
         # 1) Канальный контекст
         channel_info = await fetch_channel_info(conn, user_companychat)
         channel_id = channel_info["channel_id"]
-        session_id = channel_info["session_id"]
         user_id = channel_info["user_id"]
 
-        # 2) Последовательный сбор данных
+        # 2) Последовательный сбор данных (на одном conn параллелить нельзя)
         prompts_info = await fetch_prompts(conn, user_companychat)
         category = await fetch_category(conn, channel_id)
         products_full = await fetch_services(conn, channel_id)
         probny = await fetch_probny(conn, channel_id)
         first_dialog = await fetch_is_first_dialog(conn, user_companychat)
+
+        # ✅ Эти два — сетевые, позже тоже переведём на shared http client
         masters_info = await fetch_masters_info(channel_id)
         user_info = await fetch_personal_info(user_id)
 
@@ -96,57 +116,10 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
         flat_data = flatten_dict_no_prefix(data)
         return {"data": flat_data}
 
-    finally:
-        await conn.close()
-
-
-
-# async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
-#     """Функция получения всех данных из Postgres."""
-#     conn = await asyncpg.connect(**POSTGRES_CONFIG)
-#     try:
-#         # 1) Канальный контекст
-#         channel_info = await fetch_channel_info(conn, user_companychat)
-#         channel_id = channel_info["channel_id"]
-#         session_id = channel_info["session_id"]
-#         user_id = channel_info["user_id"]
-
-#         # 2) Параллельный сбор зависимых данных
-#         # Важно: на одном соединении asyncpg нельзя выполнять несколько запросов одновременно.
-#         # Поэтому либо запускаем их последовательно на одном conn, либо используем пул (см. вариант 2).
-#         # Здесь делаем последовательную выборку, а не gather на одном conn.
-#         prompts_info = await fetch_prompts(conn, user_companychat)
-#         category = await fetch_category(conn, channel_id)
-#         products_full = await fetch_services(conn, channel_id)
-#         probny = await fetch_probny(conn, channel_id)
-#         first_dialog = await fetch_is_first_dialog(conn, user_companychat)
-#         masters_info = await fetch_masters_info(channel_id)
-#         user_info = await fetch_personal_info(user_id)
-#         # user_records = await fetch_personal_records(user_companychat, channel_id)
-
-#         data = {
-#             "user_id": user_id,
-#             "date_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-#             **channel_info,
-#             "prompts_info": prompts_info,
-#             "category": category,
-#             "products_full" : products_full,
-#             "probny": probny,
-#             "first_dialog": first_dialog,
-#             "user_info": user_info,
-#             # "user_records": user_records,
-#             "masters_info": masters_info,
-#         }
-#         flat_data = flatten_dict_no_prefix(data)
-#         return {"data": flat_data}
-#     finally:
-#         await conn.close()
 
 async def data_user_info(user_companychat: int) -> dict[str, Any]:
-    """Функция получения данных о пользователе и компании из Postgres."""
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
-        # 1) Канальный контекст
+    """Функция получения данных о пользователе и компании из Postgres (через pool)."""
+    async with pg_conn() as conn:
         channel_info = await fetch_channel_info(conn, user_companychat)
         user_id = channel_info["user_id"]
         user_info = await fetch_personal_info(user_id)
@@ -159,10 +132,11 @@ async def data_user_info(user_companychat: int) -> dict[str, Any]:
         }
         flat_data = flatten_dict_no_prefix(data)
         return {"data": flat_data}
-    finally:
-        await conn.close()
 
 
+# ---------------------------------------------------------------------
+# queries that already accept conn
+# ---------------------------------------------------------------------
 @retry_async()
 async def fetch_dialog(conn: asyncpg.Connection, user_companychat: int) -> Any:
     """Получение диалога."""
@@ -186,7 +160,6 @@ async def fetch_dialog(conn: asyncpg.Connection, user_companychat: int) -> Any:
     return joined_messages, query
 
 
-
 def pg_rows_to_products(rows: Iterable[asyncpg.Record]) -> list[dict[str, Any]]:
     """Преобразует asyncpg rows в формат продуктов, идентичный points_to_list."""
     result: list[dict[str, Any]] = []
@@ -195,31 +168,36 @@ def pg_rows_to_products(rows: Iterable[asyncpg.Record]) -> list[dict[str, Any]]:
         if not r:
             continue
 
-        price_min = r.get("price_min")
-        price_max = r.get("price_max")
+        # asyncpg.Record поддерживает dict-like доступ
+        price_min = r["price_min"]
+        price_max = r["price_max"]
 
-        result.append({
-            "product_id": r.get("product_id"),
-            "product_name": r.get("product_name"),
-            "description": r.get("description"),
-            "duration": r.get("duration"),
-            "price": (
-                f"{price_min} руб."
-                if price_min == price_max
-                else f"{price_min} - {price_max} руб."
-            )
-            if price_min is not None and price_max is not None
-            else None,
-        })
+        result.append(
+            {
+                "product_id": r["product_id"],
+                "product_name": r["product_name"],
+                "description": r["description"],
+                "duration": r["duration"],
+                "price": (
+                    f"{price_min} руб."
+                    if price_min == price_max
+                    else f"{price_min} - {price_max} руб."
+                )
+                if price_min is not None and price_max is not None
+                else None,
+            }
+        )
 
     return result
 
 
+# ---------------------------------------------------------------------
+# queries that used to open new connections
+# ---------------------------------------------------------------------
 @retry_async()
 async def fetch_key_words(channel_id: int, key_word: str) -> Any:
-    """Получение ключевых фраз"""
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
+    """Получение ключевых фраз (через pool)."""
+    async with pg_conn() as conn:
         rows = await conn.fetch(
             """
             select distinct on (p2.product_name)
@@ -238,15 +216,14 @@ async def fetch_key_words(channel_id: int, key_word: str) -> Any:
                 p2.product_name,
                 case when p2.channel_id = $1 then 0 else 1 end;
             """,
-            channel_id, key_word
+            channel_id,
+            key_word,
         )
 
         if not rows:
             return []
 
         return pg_rows_to_products(rows)
-    finally:
-        await conn.close()
 
 
 @retry_async()
@@ -261,15 +238,13 @@ async def fetch_is_first_dialog(conn: asyncpg.Connection, user_companychat: int)
         """,
         user_companychat,
     )
-    logger.info(f"=====fetch_is_first_dialog=====")
-    logger.info(f"count: {count}")
+    logger.info("=====fetch_is_first_dialog=====")
+    logger.info("count: %s", count)
     return count == 1
 
 
 @retry_async()
-async def fetch_channel_info(
-    conn: asyncpg.Connection, user_companychat: int
-) -> Dict[str, Any]:
+async def fetch_channel_info(conn: asyncpg.Connection, user_companychat: int) -> Dict[str, Any]:
     """Получение информации о компании."""
     row: asyncpg.Record | None = await conn.fetchrow(
         """
@@ -293,9 +268,7 @@ async def fetch_channel_info(
 
 
 @retry_async()
-async def fetch_prompts(
-    conn: asyncpg.Connection, user_companychat: int
-) -> Dict[str, Any]:
+async def fetch_prompts(conn: asyncpg.Connection, user_companychat: int) -> Dict[str, Any]:
     """Получение промта."""
     row: asyncpg.Record | None = await conn.fetchrow(
         """
@@ -333,14 +306,13 @@ async def fetch_prompts(
     if not row:
         return {}
 
-    prompt_types = row["prompt_types"] if row["prompt_types"] is not None else ""
-    prompt_agents = row["prompt_agents"] if row["prompt_agents"] is not None else ""
+    prompt_types = row["prompt_types"] or ""
+    prompt_agents = row["prompt_agents"] or ""
 
     keys = prompt_types.split("$") if prompt_types else []
     values = prompt_agents.split("$") if prompt_agents else []
 
-    result = {k: v for k, v in zip(keys, values)}
-    return result
+    return {k: v for k, v in zip(keys, values)}
 
 
 @retry_async()
@@ -354,20 +326,16 @@ async def fetch_category(conn: asyncpg.Connection, channel_id: int) -> str:
         WHERE p.product_unid_ean != 'Адрес клуба'
           AND p.channel_id = $1
         """,
-        channel_id,  # без кортежа
+        channel_id,
     )
-    list_category: List[str] = (
-        [f" - {row['product_unid_ean']}" for row in rows] if rows else []
-    )
-    string_category = ", \n".join(list_category)
-    return string_category
+    list_category: List[str] = [f" - {row['product_unid_ean']}" for row in rows] if rows else []
+    return ", \n".join(list_category)
+
 
 @retry_async()
 async def fetch_services(conn: asyncpg.Connection, channel_id: int) -> str:
-    """Получение товаров/услуг. Это нужно для компаний с малым количеством услуг.
-    Для примера Алена с количеством услуг 5 шт. channel_id=20"""
-
-    if channel_id not in [7, 20]:
+    """Получение товаров/услуг (для компаний с малым количеством услуг)."""
+    if channel_id not in [20]:
         return []
 
     rows: List[asyncpg.Record] = await conn.fetch(
@@ -379,13 +347,14 @@ async def fetch_services(conn: asyncpg.Connection, channel_id: int) -> str:
         WHERE p.channel_id = $1
         LIMIT 6
         """,
-        channel_id,  # без кортежа
+        channel_id,
     )
     list_category: List[str] = (
-        [f"{idx+1}. ID:{row['article']} - {row['product_name']}" for idx, row in enumerate(rows)] if rows else []
+        [f"{idx+1}. ID:{row['article']} - {row['product_name']}" for idx, row in enumerate(rows)]
+        if rows
+        else []
     )
-    string_services = ", \n".join(list_category)
-    return string_services
+    return ", \n".join(list_category)
 
 
 @retry_async()
@@ -407,123 +376,114 @@ async def fetch_probny(conn: asyncpg.Connection, channel_id: int) -> str:
         """,
         channel_id,
     )
-    # Нормализация данных и безопасная подстановка
+
     parts: List[str] = []
     for r in rows or []:
         name = (r["product_name"] or "").strip()
         duration = (r["duration"] or "").strip()
         price_min = r["price_min"]
-        # Можно показать диапазон, если он есть
         price_part = (
             f"{price_min}"
             if r["price_max"] in (None, price_min)
             else f"{price_min}–{r['price_max']}"
         )
-        piece = (
-            f"Название: {name}. Продолжительность: {duration}. Стоимость: {price_part}"
-        )
-        parts.append(piece)
+        parts.append(f"Название: {name}. Продолжительность: {duration}. Стоимость: {price_part}")
+
     return ", ".join(parts)
 
 
+# ---------------------------------------------------------------------
+# mutating actions that used to open new connections
+# ---------------------------------------------------------------------
 @retry_async()
 async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
     """Удаление истории диалога. Используется для тестирования."""
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
+    async with pg_conn() as conn:
         channel_info = await fetch_channel_info(conn, user_companychat)
         session_id = channel_info.get("session_id")
         if not session_id:
-            logger.error(
-                f"Session ID not found for user_companychat={user_companychat}"
-            )
+            logger.error("Session ID not found for user_companychat=%s", user_companychat)
             return {"success": False, "error": "session_id not found"}
 
-        success = False
         try:
             async with conn.transaction():
-
-                del_bot_history  = await conn.execute(
+                del_bot_history = await conn.execute(
                     "DELETE FROM public.bot_history bh WHERE bh.user_companychat = $1;",
-                    user_companychat
+                    user_companychat,
                 )
-            success = True
-            logger.info(f"Данные из истории удалены: {del_bot_history}")
+            logger.info("Данные из истории удалены: %s", del_bot_history)
+            return {"success": True}
         except Exception as e:
-            logger.error(f"Error deleting history messages: {e}")
-            success = False
-
-        return {"success": success}
-    finally:
-        await conn.close()
+            logger.error("Error deleting history messages: %s", e)
+            return {"success": False}
 
 
 @retry_async()
 async def delete_personal_data(user_companychat: int) -> Dict[str, Any]:
-    """Удаление истории диалога. Используется для тестирования."""
+    """Удаление персональных данных пользователя (тестирование)."""
     logger.info("===delete_personal_data===")
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
+    async with pg_conn() as conn:
         channel_info = await fetch_channel_info(conn, user_companychat)
-        logger.info(f"channel_info: {channel_info}")
-        success = False
+        logger.info("channel_info: %s", channel_info)
+
         try:
             async with conn.transaction():
                 user_id = await conn.fetchval(
-                    '''
+                    """
                     select u.id
                     from contact_companychat cc
                     join "user" u on u.user_id = cc.user_chattype_id
                     where cc.id = $1
-                    ''',
+                    """,
                     user_companychat,
                 )
                 logger.info("user_id: %s", user_id)
+
                 del_personal_data_consent = await conn.execute(
-                    "DELETE FROM personal_data_consent WHERE user_id = $1", user_id
+                    "DELETE FROM personal_data_consent WHERE user_id = $1",
+                    user_id,
                 )
                 del_personal_data = await conn.execute(
-                    "DELETE FROM personal_data WHERE user_id = $1", user_id
+                    "DELETE FROM personal_data WHERE user_id = $1",
+                    user_id,
                 )
-                del_user= await conn.execute(
-                    'DELETE FROM "user" WHERE id = $1', user_id
+                del_user = await conn.execute(
+                    'DELETE FROM "user" WHERE id = $1',
+                    user_id,
                 )
 
-            success = True
-            logger.info(f"Персональные данные удалены: {del_personal_data_consent}, {del_personal_data}, {del_user}")
+            logger.info(
+                "Персональные данные удалены: %s, %s, %s",
+                del_personal_data_consent,
+                del_personal_data,
+                del_user,
+            )
+            return {"success": True}
         except Exception as e:
-            logger.error(f"Error deleting history messages: {e}")
-            success = False
-
-        return {"success": success}
-    finally:
-        await conn.close()
-
+            logger.error("Error deleting personal data: %s", e)
+            return {"success": False}
 
 
 @retry_async()
 async def save_query_from_human_in_postgres(user_companychat: int, query: str) -> bool:
     """Сохранение запроса клиента в Postgres. Необходимо при тестировании в Studio."""
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
-        await conn.execute(
-            """
-            INSERT INTO bot_history 
-            (user_companychat, is_bot, for_user, dialog_state_id, created_at, indata)
-            VALUES 
-            ($1, $2, $3, $4, $5, $6)
-            """,
-            user_companychat,  # $1
-            0,                 # $2
-            False,             # $3
-            1,                 # $4
-            datetime.now(),    # $5
-            query              # $6
-        )
-        success = True
-    except Exception as e:
-        logger.error(f"Error saving query to bot_history: {e}")
-        success = False
-    finally:
-        await conn.close()
-        return success
+    async with pg_conn() as conn:
+        try:
+            await conn.execute(
+                """
+                INSERT INTO bot_history 
+                (user_companychat, is_bot, for_user, dialog_state_id, created_at, indata)
+                VALUES 
+                ($1, $2, $3, $4, $5, $6)
+                """,
+                user_companychat,
+                0,
+                False,
+                1,
+                datetime.now(),
+                query,
+            )
+            return True
+        except Exception as e:
+            logger.error("Error saving query to bot_history: %s", e)
+            return False
