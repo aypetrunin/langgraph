@@ -139,3 +139,5 @@ venv.bak/
 *.DS_Store
 Thumbs.db
 __pycache__/
+_review_dump_*.txt
+dump.py
