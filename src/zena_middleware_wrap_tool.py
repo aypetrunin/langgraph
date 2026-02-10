@@ -119,6 +119,7 @@ async def _run_template(
     Общий шаблон: port_guard + envelope + (success?) + typecheck(data) + truthy(data) + on_ok.
     Возвращает env.data, либо None.
     """
+    logger.info('_run_template')
     if not port_guard(request):
         return None
 
@@ -133,6 +134,8 @@ async def _run_template(
 
     state_data = request.state["data"]
     on_ok(state_data, data_value, request)
+    logger.info(f"state_data['desired_date']: {state_data['desired_date']}")
+    logger.info(f"state_data['desired_time']: {state_data['desired_time']}")
     return data_value
 
 
@@ -214,6 +217,7 @@ async def pp_available_time_for_master_list(env: Envelope, request: ToolCallRequ
 
 
 async def pp_record_time(env: Envelope, request: ToolCallRequest) -> Any:
+    logger.info('pp_record_time')
     def on_ok(data: dict, tools_data: dict, request: ToolCallRequest) -> None:
         tool_args = request.tool_call.get("args") or {}
         data["dialog_state"] = "postrecord"
@@ -287,6 +291,7 @@ async def pp_call_administrator(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_records(env: Envelope, request: ToolCallRequest) -> Any:
+    logger.info('pp_records')
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
         if tools_data:
             data["user_records"] = tools_data
@@ -306,6 +311,7 @@ async def pp_records(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_record_delete(env: Envelope, request: ToolCallRequest) -> Any:
+    logger.info('pp_record_delete')
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         data["user_records"] = []
         data["desired_date"] = None
@@ -322,6 +328,7 @@ async def pp_record_delete(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_record_reschedule(env: Envelope, request: ToolCallRequest) -> Any:
+    logger.info('pp_record_reschedule')
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         data["user_records"] = []
         data["desired_date"] = None

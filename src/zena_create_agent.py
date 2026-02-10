@@ -100,23 +100,23 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
             ResetData(),
             SaveResponceAgent(),
             
-            # ContextEditingMiddleware(
-            #     edits=[
-            #         ClearToolUsesEdit(
-            #             trigger=2000,
-            #             keep=2,
-            #             clear_tool_inputs=True,
-            #             exclude_tools=[],
-            #             placeholder="[cleared]",
-            #         ),
-            #     ],
-            # ),
+            ContextEditingMiddleware(
+                edits=[
+                    ClearToolUsesEdit(
+                        trigger=2000,
+                        keep=2,
+                        clear_tool_inputs=False,
+                        exclude_tools=[],
+                        placeholder="[cleared]",
+                    ),
+                ],
+            ),
             ModelFallbackMiddleware(
                 model_4o_mini,
                 model_4o_mini_reserv,
             ),
             ToolCallLimitMiddleware(
-                run_limit=10,
+                run_limit=20,
             )
             # PIIMiddleware(
             #     "phone",
