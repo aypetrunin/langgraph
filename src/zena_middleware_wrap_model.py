@@ -115,7 +115,7 @@ class DynamicSystemPrompt(AgentMiddleware):
 
         if is_dev:
             # В dev можно позволить себе больше, но всё равно осторожно:
-            logger.info("system_prompt(len=%s, sha=%s):\n%s", prompt_len, prompt_hash, system_prompt)
+            logger.info("system_prompt(len=%s, sha=%s):\n%s", prompt_len, prompt_hash, system_prompt[:300])
         else:
             # В prod — только метаданные
             logger.info("system_prompt rendered (len=%s, sha=%s)", prompt_len, prompt_hash)

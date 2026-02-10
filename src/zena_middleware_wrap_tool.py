@@ -134,6 +134,7 @@ async def _run_template(
 
     state_data = request.state["data"]
     on_ok(state_data, data_value, request)
+    logger.info(f"state_data['dialog_state']: {state_data['dialog_state']}")
     logger.info(f"state_data['desired_date']: {state_data['desired_date']}")
     logger.info(f"state_data['desired_time']: {state_data['desired_time']}")
     return data_value
@@ -204,6 +205,7 @@ async def pp_available_time_for_master(env: Envelope, request: ToolCallRequest) 
 
 
 async def pp_available_time_for_master_list(env: Envelope, request: ToolCallRequest) -> Any:
+    logger.info('pp_available_time_for_master_list')
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
         if len(tools_data) < 2:
             return
@@ -295,8 +297,8 @@ async def pp_records(env: Envelope, request: ToolCallRequest) -> Any:
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
         if tools_data:
             data["user_records"] = tools_data
-            data["desired_date"] = None
-            data["desired_time"] = None
+            # data["desired_date"] = None
+            # data["desired_time"] = None
         else:
             data["user_records"] = "У Вас нет записей на услуги."
 
