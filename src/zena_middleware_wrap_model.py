@@ -183,7 +183,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
     POSTRECORD_OVERRIDE: set[str] = {"zena_recommendations"}
 
     # ====== Ports ======
-    CLASSIC_PORTS = {15001, 5001, 5002, 15002, 15005, 5005, 15006, 5006, 15021, 5021, 15024, 5024}
+    CLASSIC_PORTS = {15001, 5001, 5002, 15002, 15005, 5005, 15006, 5006, 15021, 5021, 15024, 5024, 15017, 5017,}
     PORTS_4007_5007 = {15007, 5007}
     PORT_5020 = {15020, 5020}
 
