@@ -1,3 +1,4 @@
+# zena_request_masters_cache.py
 """
 КЕШ МАСТЕРОВ (вариант B: stale-while-revalidate, обновление раз в час)
 
@@ -50,15 +51,13 @@ TIMEOUT_SECONDS = 120.0
 REFRESH_INTERVAL_SECONDS = 60 * 60  # 3600
 
 # TTL хранения ключей в Redis (долго, чтобы кеш не пропадал, обновление решает meta.updated_at)
-# Если хочешь — можно сделать 24*60*60 (сутки) или 7*24*60*60 (неделя)
 REDIS_VALUE_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 дней
 
-# Лок на обновление (короткий)
-LOCK_TTL_SECONDS = 60
-LOCK_RETRY_DELAY = 0.2
+# Лок на обновление (должен быть больше worst-case времени fetch origin)
+LOCK_TTL_SECONDS = 240  # было 60; важно > TIMEOUT_SECONDS, иначе возможны параллельные обновления
 
-# Если Redis недоступен — in-memory fallback (TTL просто "долго", обновление по updated_at)
-MEM_VALUE_TTL_SECONDS = 24 * 60 * 60  # сутки (для локальной памяти нормально)
+# Если Redis недоступен — in-memory fallback
+MEM_VALUE_TTL_SECONDS = 24 * 60 * 60  # сутки
 
 
 # =========================
@@ -67,6 +66,7 @@ MEM_VALUE_TTL_SECONDS = 24 * 60 * 60  # сутки (для локальной п
 # Храним: key -> (expires_at, value_json_str)
 _mem_kv: dict[str, tuple[float, str]] = {}
 _mem_lock = asyncio.Lock()
+
 
 def _mem_get(key: str) -> str | None:
     item = _mem_kv.get(key)
@@ -78,8 +78,21 @@ def _mem_get(key: str) -> str | None:
         return None
     return val
 
+
 def _mem_set(key: str, value: str, ttl_seconds: int) -> None:
     _mem_kv[key] = (time.time() + ttl_seconds, value)
+
+
+async def _try_acquire_mem_lock() -> bool:
+    """
+    Пытаемся захватить asyncio.Lock без ожидания.
+    Если занято — сразу False.
+    """
+    try:
+        await asyncio.wait_for(_mem_lock.acquire(), timeout=0)
+        return True
+    except asyncio.TimeoutError:
+        return False
 
 
 # =========================
@@ -92,6 +105,7 @@ def _normalize_redis_url(url: str | None) -> str | None:
     if "://" not in u:
         u = f"redis://{u}"
     return u
+
 
 def resolve_redis_url() -> str:
     """
@@ -117,6 +131,7 @@ def resolve_redis_url() -> str:
 # Redis client (safe)
 # =========================
 _redis: redis.Redis | None = None
+
 
 async def get_redis_safe() -> redis.Redis | None:
     """
@@ -147,8 +162,10 @@ async def get_redis_safe() -> redis.Redis | None:
 def _data_key(channel_id: int | None) -> str:
     return f"masters:{int(channel_id or 0)}"
 
+
 def _meta_key(channel_id: int | None) -> str:
     return f"masters:{int(channel_id or 0)}:meta"
+
 
 def _lock_key(channel_id: int | None) -> str:
     return f"lock:masters:{int(channel_id or 0)}"
@@ -165,6 +182,7 @@ else
 end
 """
 
+
 async def _try_acquire_lock(r: redis.Redis, key: str) -> str | None:
     """
     Пытаемся взять лок ОДИН раз (без ожидания), потому что это фон.
@@ -174,11 +192,49 @@ async def _try_acquire_lock(r: redis.Redis, key: str) -> str | None:
     ok = await r.set(key, token, nx=True, ex=LOCK_TTL_SECONDS)
     return token if ok else None
 
+
 async def _release_lock(r: redis.Redis, key: str, token: str) -> None:
     try:
         await r.eval(_RELEASE_LUA, 1, key, token)
     except Exception:
         pass
+
+
+# =========================
+# Helpers: safe parsing
+# =========================
+def _safe_loads_list(json_str: str) -> list[dict[str, Any]]:
+    try:
+        data = json.loads(json_str)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _extract_updated_at(meta_json: str | None) -> int:
+    if not meta_json:
+        return 0
+    try:
+        v = json.loads(meta_json).get("updated_at", 0)
+        return int(v) if v else 0
+    except Exception:
+        return 0
+
+
+def _extract_position(staff_item: dict[str, Any]) -> str | None:
+    """
+    position может приходить:
+      - str
+      - dict {"title": "..."}
+      - None
+    """
+    pos = staff_item.get("position")
+    if isinstance(pos, str):
+        return pos
+    if isinstance(pos, dict):
+        title = pos.get("title")
+        return title if isinstance(title, str) else None
+    return None
 
 
 # =========================
@@ -193,6 +249,7 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
     - Если данные есть:
         - если свежие -> сразу возвращаем.
         - если протухли -> сразу возвращаем старые и запускаем фон-обновление.
+          ВАЖНО: чтобы не плодить тысячи тасок под нагрузкой, лок берём ДО create_task.
     """
     logger.info("===get_masters===")
     logger.info("Получение списка мастеров channel_id=%s", channel_id)
@@ -208,29 +265,27 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
             cached_data = await r.get(data_key)
             cached_meta = await r.get(meta_key)
 
-            # Если кеш есть — решаем, свежий ли он
             if cached_data:
-                updated_at = 0
-                if cached_meta:
-                    try:
-                        updated_at = int(json.loads(cached_meta).get("updated_at", 0))
-                    except Exception:
-                        updated_at = 0
-
+                updated_at = _extract_updated_at(cached_meta)
                 age = time.time() - updated_at if updated_at else 10**18
                 is_fresh = age < REFRESH_INTERVAL_SECONDS
 
-                # Всегда возвращаем кеш сразу
                 if is_fresh:
                     logger.info("CACHE HIT (fresh) channel_id=%s age=%ss", channel_id, int(age))
-                    return json.loads(cached_data)
+                    return _safe_loads_list(cached_data)
 
-                # Протух — вернем старое и обновим в фоне
+                # stale: вернуть сразу, а обновление — одним воркером
                 logger.info("CACHE HIT (stale) channel_id=%s age=%ss -> background refresh", channel_id, int(age))
-                asyncio.create_task(_refresh_in_background_redis(r, channel_id))
-                return json.loads(cached_data)
 
-            # Кеша нет -> синхронный fetch
+                # --- ВАЖНО: сначала пробуем взять лок, и только если взяли — создаём таску
+                lock_key = _lock_key(channel_id)
+                token = await _try_acquire_lock(r, lock_key)
+                if token:
+                    asyncio.create_task(_refresh_in_background_redis_with_token(r, channel_id, token))
+
+                return _safe_loads_list(cached_data)
+
+            # MISS -> sync fetch
             logger.info("CACHE MISS channel_id=%s -> fetch origin", channel_id)
             masters = await _fetch_origin(channel_id)
             await _write_cache_redis(r, channel_id, masters)
@@ -246,30 +301,21 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
 # =========================
 # Redis background refresh
 # =========================
-async def _refresh_in_background_redis(r: redis.Redis, channel_id: int | None) -> None:
+async def _refresh_in_background_redis_with_token(r: redis.Redis, channel_id: int | None, token: str) -> None:
     """
-    Фоновое обновление:
-    - пытаемся взять лок (одна попытка)
-    - если не взяли — кто-то уже обновляет, выходим
-    - если взяли — тянем origin и перезаписываем кеш+meta
+    Фоновое обновление (лок уже взят):
+    - тянем origin и перезаписываем кеш+meta
+    - отпускаем лок
     """
     lock_key = _lock_key(channel_id)
-
     try:
-        token = await _try_acquire_lock(r, lock_key)
-        if token is None:
-            return
-
-        try:
-            masters = await _fetch_origin(channel_id)
-            await _write_cache_redis(r, channel_id, masters)
-            logger.info("BACKGROUND REFRESH OK channel_id=%s", channel_id)
-        finally:
-            await _release_lock(r, lock_key, token)
-
+        masters = await _fetch_origin(channel_id)
+        await _write_cache_redis(r, channel_id, masters)
+        logger.info("BACKGROUND REFRESH OK channel_id=%s", channel_id)
     except Exception as e:
-        # Фоновые ошибки не должны мешать запросу
         logger.warning("BACKGROUND REFRESH FAILED channel_id=%s err=%s", channel_id, e)
+    finally:
+        await _release_lock(r, lock_key, token)
 
 
 async def _write_cache_redis(r: redis.Redis, channel_id: int | None, masters: list[dict[str, Any]]) -> None:
@@ -285,8 +331,7 @@ async def _write_cache_redis(r: redis.Redis, channel_id: int | None, masters: li
     payload = json.dumps(masters, ensure_ascii=False)
     meta = json.dumps({"updated_at": int(time.time())})
 
-    # Пишем атомарно в pipeline
-    pipe = r.pipeline()
+    pipe = r.pipeline(transaction=True)
     pipe.setex(data_key, REDIS_VALUE_TTL_SECONDS, payload)
     pipe.setex(meta_key, REDIS_VALUE_TTL_SECONDS, meta)
     await pipe.execute()
@@ -302,6 +347,7 @@ async def _fetch_masters_memory_fallback(channel_id: int | None) -> list[dict[st
     Если Redis недоступен:
     - используем in-memory два ключа (data/meta) так же, как в Redis
     - фон-обновление делаем через asyncio.create_task с локом на уровне процесса
+      (лок берём ДО create_task — чтобы не плодить таски)
     """
     data_key = _data_key(channel_id)
     meta_key = _meta_key(channel_id)
@@ -310,23 +356,21 @@ async def _fetch_masters_memory_fallback(channel_id: int | None) -> list[dict[st
     cached_meta = _mem_get(meta_key)
 
     if cached_data:
-        updated_at = 0
-        if cached_meta:
-            try:
-                updated_at = int(json.loads(cached_meta).get("updated_at", 0))
-            except Exception:
-                updated_at = 0
-
+        updated_at = _extract_updated_at(cached_meta)
         age = time.time() - updated_at if updated_at else 10**18
         is_fresh = age < REFRESH_INTERVAL_SECONDS
 
         if is_fresh:
             logger.info("MEM CACHE HIT (fresh) channel_id=%s age=%ss", channel_id, int(age))
-            return json.loads(cached_data)
+            return _safe_loads_list(cached_data)
 
         logger.info("MEM CACHE HIT (stale) channel_id=%s age=%ss -> background refresh", channel_id, int(age))
-        asyncio.create_task(_refresh_in_background_mem(channel_id))
-        return json.loads(cached_data)
+
+        # --- ВАЖНО: сначала пробуем взять лок, и только если взяли — создаём таску
+        if await _try_acquire_mem_lock():
+            asyncio.create_task(_refresh_in_background_mem_locked(channel_id))
+
+        return _safe_loads_list(cached_data)
 
     # MISS -> sync fetch
     logger.info("MEM CACHE MISS channel_id=%s -> fetch origin", channel_id)
@@ -335,23 +379,23 @@ async def _fetch_masters_memory_fallback(channel_id: int | None) -> list[dict[st
     return masters
 
 
-async def _refresh_in_background_mem(channel_id: int | None) -> None:
+async def _refresh_in_background_mem_locked(channel_id: int | None) -> None:
     """
-    Фоновое обновление в памяти:
-    используем _mem_lock как лок, чтобы один поток обновлял.
+    Фоновое обновление в памяти.
+    Предполагается, что _mem_lock уже захвачен (без ожидания) до create_task.
     """
     try:
-        # попытка "не ждать": если лок занят — выходим
-        if _mem_lock.locked():
-            return
-
-        async with _mem_lock:
-            masters = await _fetch_origin(channel_id)
-            _write_cache_mem(channel_id, masters)
-            logger.info("MEM BACKGROUND REFRESH OK channel_id=%s", channel_id)
-
+        masters = await _fetch_origin(channel_id)
+        _write_cache_mem(channel_id, masters)
+        logger.info("MEM BACKGROUND REFRESH OK channel_id=%s", channel_id)
     except Exception as e:
         logger.warning("MEM BACKGROUND REFRESH FAILED channel_id=%s err=%s", channel_id, e)
+    finally:
+        # важно отпустить лок
+        try:
+            _mem_lock.release()
+        except Exception:
+            pass
 
 
 def _write_cache_mem(channel_id: int | None, masters: list[dict[str, Any]]) -> None:
@@ -373,8 +417,6 @@ def _write_cache_mem(channel_id: int | None, masters: list[dict[str, Any]]) -> N
 async def _fetch_origin(channel_id: int | None) -> list[dict[str, Any]]:
     """
     Реальный вызов внешнего сервиса.
-    ВАЖНО: тут намеренно нет retry_async, чтобы не поймать проблему с декоратором.
-    Если хочешь ретраи — лучше обернуть именно этот кусок (тенасити/ручной retry).
     """
     url = "https://httpservice.ai2b.pro/appointments/yclients/staff/actual"
 
@@ -403,13 +445,9 @@ async def _fetch_origin(channel_id: int | None) -> list[dict[str, Any]]:
                     "office_id": office_id,
                     "masters": [
                         {
-                            "master_id": s["id"],
-                            "master_name": s["name"],
-                            "position": (
-                                s.get("position")
-                                if isinstance(s.get("position"), str)
-                                else s.get("position", {}).get("title")
-                            ),
+                            "master_id": s.get("id"),
+                            "master_name": s.get("name"),
+                            "position": _extract_position(s),
                         }
                         for s in resp_json.get("staff", [])
                     ],
@@ -417,6 +455,7 @@ async def _fetch_origin(channel_id: int | None) -> list[dict[str, Any]]:
             )
 
         return masters_list
+
 
 
 
