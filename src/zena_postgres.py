@@ -367,7 +367,7 @@ async def fetch_services(conn: asyncpg.Connection, channel_id: int) -> str:
     """Получение товаров/услуг. Это нужно для компаний с малым количеством услуг.
     Для примера Алена с количеством услуг 5 шт. channel_id=20"""
 
-    if channel_id not in [20]:
+    if channel_id not in [7, 20]:
         return []
 
     rows: List[asyncpg.Record] = await conn.fetch(
