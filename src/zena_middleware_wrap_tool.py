@@ -222,8 +222,8 @@ async def pp_record_time(env: Envelope, request: ToolCallRequest) -> Any:
     logger.info('pp_record_time')
     def on_ok(data: dict, tools_data: dict, request: ToolCallRequest) -> None:
         tool_args = request.tool_call.get("args") or {}
-        # data["dialog_state"] = "postrecord"
-        data["dialog_state"] = "new"
+        data["dialog_state"] = "postrecord"
+        # data["dialog_state"] = "new"
         data["desired_date"] = tool_args.get("date")
         data["office_id"] = tool_args.get("office_id")
         data["desired_master"] = {"master_id": tool_args.get("master_id")}
