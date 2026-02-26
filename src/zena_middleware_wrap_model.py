@@ -349,11 +349,12 @@ class ToolSelectorMiddleware(AgentMiddleware):
     def _has_contact_bundle(data: dict) -> bool:
         consent = bool(data.get("consent"))
         phone = str(data.get("phone") or "").strip()
-        email = str(data.get("email") or "").strip()
-        first = str(data.get("first_name") or "").strip()
-        last = str(data.get("last_name") or "").strip()
-        name_ok = bool(first or last)
-        return bool(consent and name_ok and phone and email)
+        # email = str(data.get("email") or "").strip()
+        # first = str(data.get("first_name") or "").strip()
+        # last = str(data.get("last_name") or "").strip()
+        # name_ok = bool(first or last)
+        # return bool(consent and name_ok and phone and email)
+        return bool(consent and phone)
 
     # =========================================================================
     # 4007/5007
