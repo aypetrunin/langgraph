@@ -227,7 +227,7 @@ async def pp_record_time(env: Envelope, request: ToolCallRequest) -> Any:
         data["desired_date"] = tool_args.get("date")
         data["office_id"] = tool_args.get("office_id")
         data["desired_master"] = {"master_id": tool_args.get("master_id")}
-        data["item_selected"] = [{"item_id": tool_args.get("product_id")}]
+        data["item_selected"] = [{"item_id": tool_args.get("product_id"), "item_name": tool_args.get("product_name")}]
 
     return await zena_default(
         request=request,
@@ -417,8 +417,12 @@ async def pp_remember_master(env: Envelope, request: ToolCallRequest) -> Any:
 async def pp_product_remember(env: Envelope, request: ToolCallRequest) -> Any:
     items_out: list[dict] = []
 
+    logger.info('pp_product_remember')
+    logger.info(f"")
+
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         nonlocal items_out
+        logger.info(f"tools_data: {tools_data}")
         products: list[Any] = tools_data or []
         items_out = [parse_item(x) for x in products if isinstance(x, dict)]
         if not items_out:
