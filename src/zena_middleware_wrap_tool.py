@@ -198,7 +198,7 @@ async def pp_available_time_for_master(env: Envelope, request: ToolCallRequest) 
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
         data.setdefault("available_time", [])
         data["available_time"].append(tools_data)
-        if not data.get("user_records"):
+        if not data.get("user_records") or data.get("user_records") == 'У Вас нет записей на услуги.':
             data["dialog_state"] = "available_time"
 
     return await zena_default(request=request, env=env, expected_data_type=list, on_ok=on_ok, require_success=True)
