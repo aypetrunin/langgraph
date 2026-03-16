@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.25.0",
     "uvicorn>=0.35.0",
-    "sse-starlette>=2.1.0,<2.2.0",
+    "sse-starlette>=3.0.0,<3.4.0",
     "uvloop>=0.18.0",
     "httptools>=0.5.0",
     "jsonschema-rs>=0.20.0",
@@ -37,7 +37,7 @@ dependencies = [
     "langsmith>=0.4.38",
     "langchain>=1.0.5",
     "langchain-mcp-adapters>=0.1.12",
-    "langgraph-api==0.6.35",
+    "langgraph-api==0.7.68",
     "langgraph-checkpoint-postgres>=3.0.1",
     "psycopg[binary,pool]>=3.3.0",
     "google-auth>=2.47.0",
