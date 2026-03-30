@@ -221,12 +221,26 @@ async def pp_available_time_for_master_list(env: Envelope, request: ToolCallRequ
 async def pp_record_time(env: Envelope, request: ToolCallRequest) -> Any:
     logger.info('pp_record_time')
     def on_ok(data: dict, tools_data: dict, request: ToolCallRequest) -> None:
-        tool_args = request.tool_call.get("args") or {}
-        data["dialog_state"] = "postrecord"
-        data["desired_date"] = tool_args.get("date")
-        data["office_id"] = tool_args.get("office_id")
-        data["desired_master"] = {"master_id": tool_args.get("master_id")}
-        data["item_selected"] = [{"item_id": tool_args.get("product_id"), "item_name": tool_args.get("product_name")}]
+            data.update(
+                {
+                    "dialog_state": "new",
+                    "items_search": [],
+                    "item_selected": [],
+                    "available_time": [],
+                    "available_sequences": [],
+                    "user_records": [],
+                    "office_id": None,
+                    "desired_date": None,
+                    "desired_time": None,
+                    "desired_master": None,
+                }
+            )
+        # tool_args = request.tool_call.get("args") or {}
+        # data["dialog_state"] = "new"
+        # data["desired_date"] = tool_args.get("date")
+        # data["office_id"] = tool_args.get("office_id")
+        # data["desired_master"] = {"master_id": tool_args.get("master_id")}
+        # data["item_selected"] = [{"item_id": tool_args.get("product_id"), "item_name": tool_args.get("product_name")}]
 
     return await zena_default(
         request=request,
@@ -462,8 +476,8 @@ async def pp_product_search(env: Envelope, request: ToolCallRequest) -> Any:
             items_search.extend(new_items)
             added_items = new_items
 
-        if items_search:
-            data["dialog_state"] = "selecting"
+        # if items_search:
+        data["dialog_state"] = "selecting"
 
     await zena_default(
         request=request,

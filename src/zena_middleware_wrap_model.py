@@ -21,7 +21,7 @@ from langchain.agents.middleware import (
     dynamic_prompt,
 )
 
-from .zena_common import logger, model_4o, model_4o_mini
+from .zena_common import logger, model_4o, model_4o_mini, model_ai
 from .zena_state import State, Context
 from .zena_google_doc import GoogleDocTemplateReader
 
@@ -412,15 +412,15 @@ class ToolSelectorMiddleware(AgentMiddleware):
         dialog_state = (data.get("dialog_state") or "new").strip()
 
         if mcp_port in self.PORTS_4007_5007:
-            return model_4o if dialog_state in ("new", "available_time") else model_4o_mini
+            return model_4o if dialog_state in ("new", "available_time") else model_ai
 
         if mcp_port in self.PORT_5020:
-            return model_4o_mini
+            return model_ai
 
         if mcp_port in self.CLASSIC_PORTS:
-            return model_4o if dialog_state in ("postrecord") else model_4o_mini # "new", "remember"
+            return model_4o if dialog_state in ("postrecord") else model_ai # "new", "remember"
 
-        return model_4o_mini
+        return model_ai
 
     # =========================================================================
     # Middleware entry

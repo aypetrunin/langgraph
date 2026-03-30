@@ -43,6 +43,7 @@ dependencies = [
     "google-auth>=2.47.0",
     "google-api-python-client>=2.188.0",
     "redis>=7.1.0",
+    "langchain-anthropic>=1.4.0",
 ]
 
 [dependency-groups]

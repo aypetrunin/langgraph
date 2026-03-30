@@ -20,7 +20,7 @@ from langchain.agents.middleware import (
 )
 
 
-from .zena_common import logger, model_4o, model_4o_mini, model_4o_mini_reserv
+from .zena_common import logger, model_4o, model_4o_mini, model_4o_mini_reserv, model_ai
 from .zena_state import State, Context
 # from .zena_memory import memory
 
@@ -75,9 +75,10 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
     
     tools_name = [tool.name for tool in tools]
     logger.info(f"create_agent_mcp tools ({mcp_port}): {tools_name}")
-    
+    logger.info(f"model_ai: {model_ai}")
+
     agent = create_agent( 
-        model=model_4o_mini,
+        model=model_ai,
         state_schema=State,
         context_schema=Context,
         system_prompt='Ты полезный помошник',
@@ -112,7 +113,7 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
                 ],
             ),
             ModelFallbackMiddleware(
-                model_4o_mini,
+                model_ai,
                 model_4o_mini_reserv,
             ),
             ToolCallLimitMiddleware(

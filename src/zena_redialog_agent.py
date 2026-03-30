@@ -2,10 +2,10 @@
 from langchain.agents.middleware.types import AgentState
 from langchain.agents import create_agent
 
-from .zena_common import model_4o_mini
+from .zena_common import model_ai
 
 agent_redialog = create_agent( 
-    model=model_4o_mini,
+    model=model_ai,
     state_schema=AgentState,
     system_prompt="""
 Ты — агент реанимации диалога.

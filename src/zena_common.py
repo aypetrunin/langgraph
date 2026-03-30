@@ -32,11 +32,17 @@ if not os.getenv("IS_DOCKER"):
     dotenv_path = ROOT / "deploy" / "dev.env"
     load_dotenv(dotenv_path=dotenv_path)
 
+model_default = os.getenv("MODEL_DEFAULT")
+
 openai_proxy = os.getenv("OPENAI_PROXY_URL")
 openai_model_4o_mini = os.getenv("OPENAI_MODEL_4O_MINI")
 openai_model_4o = os.getenv("OPENAI_MODEL_4O")
 openai_api_key = os.getenv("OPENAI_API_KEY")
 openai_api_key_reserv = os.getenv("OPENAI_API_KEY_RESERV")
+
+anthropic_model = os.getenv("ANTHROPIC_MODEL")
+anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+
 
 model_4o_mini = init_chat_model(
     model=openai_model_4o_mini,
@@ -47,6 +53,15 @@ model_4o_mini = init_chat_model(
         timeout=60.0
     ),
 )
+
+
+model_anthropic = init_chat_model(
+    model=anthropic_model,
+    api_key=anthropic_api_key,
+    temperature=0,
+    anthropic_proxy=openai_proxy,
+)
+
 
 model_4o_mini_reserv = init_chat_model(
     model=openai_model_4o_mini,
@@ -68,6 +83,8 @@ model_4o = init_chat_model(
         timeout=60.0
     ),
 )
+
+model_ai = model_anthropic if model_default=='anthropic' else model_4o_mini
 
 
 # -------------------- Декоратор Retry helper --------------------
