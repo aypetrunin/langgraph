@@ -21,7 +21,7 @@ class TrimMessages(AgentMiddleware):
 
         logger.info("===before_model===TrimMessages===")
 
-        MAX_COUNT_MASSAGES = 20
+        MAX_COUNT_MASSAGES = 30
 
 
         # Проверка на не пустой список диалога.

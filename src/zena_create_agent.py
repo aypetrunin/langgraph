@@ -93,7 +93,7 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
             # personalized_prompt,
             ToolSelectorMiddleware(),
             # SaveResultToolsMiddleware(),
-            # TrimMessages(),
+            TrimMessages(),
             ToolMonitoringMiddleware(),
             GetCountToken(),
             GetToolArgs(),
