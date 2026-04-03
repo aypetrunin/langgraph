@@ -418,7 +418,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
             return model_ai
 
         if mcp_port in self.CLASSIC_PORTS:
-            return model_4o if dialog_state in ("postrecord") else model_ai # "new", "remember"
+            return model_4o if dialog_state in ("zena_avaliable_time_for_master") else model_ai # "new", "remember"
 
         return model_ai
 

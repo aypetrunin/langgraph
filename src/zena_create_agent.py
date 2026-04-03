@@ -105,9 +105,9 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
                 edits=[
                     ClearToolUsesEdit(
                         trigger=2000,
-                        keep=2,
+                        keep=5,
                         clear_tool_inputs=False,
-                        exclude_tools=[],
+                        exclude_tools=['zena_records'],
                         placeholder="[cleared]",
                     ),
                 ],

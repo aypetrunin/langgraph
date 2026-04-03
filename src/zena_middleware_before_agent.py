@@ -113,11 +113,14 @@ class VerifyInputMessage(AgentMiddleware):
 class GetDatabaseMiddleware(AgentMiddleware):
     """Middleware реализует функцию чтения данных из базы данных."""
 
-    _LIST_DEFAULT_KEYS = (
+    _LIST_DEFAULT_KEYS_LIST = (
         "items_search",
         "item_selected",
         "available_time",
         "available_sequences",
+    )
+
+    _LIST_DEFAULT_KEYS_NONE = (
         "office_id",
         "desired_date",
         "desired_time",
@@ -157,9 +160,12 @@ class GetDatabaseMiddleware(AgentMiddleware):
             data["access_token"] = access_token
 
             # дефолты для списковых ключей
-            for key in self._LIST_DEFAULT_KEYS:
+            for key in self._LIST_DEFAULT_KEYS_LIST:
                 data[key] = state_data.get(key) or data.get(key) or []
- 
+            # дефолты для прочих ключей
+            for key in self._LIST_DEFAULT_KEYS_NONE:
+                data[key] = state_data.get(key) or data.get(key) or None
+
             mcp_port = data.get("mcp_port")
             logger.info("mcp_port=%s", mcp_port)
 

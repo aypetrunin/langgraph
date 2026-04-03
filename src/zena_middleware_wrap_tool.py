@@ -456,7 +456,7 @@ async def pp_product_remember(env: Envelope, request: ToolCallRequest) -> Any:
 
 async def pp_product_search(env: Envelope, request: ToolCallRequest) -> Any:
     added_items: list[dict] = []
-
+ 
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
         nonlocal added_items
         items_search = data.setdefault("items_search", [])
