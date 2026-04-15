@@ -21,7 +21,8 @@ from langchain.agents.middleware import (
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.runtime import Runtime
 
-from .zena_common import _content_to_text, logger
+from .zena_common import _content_to_text
+from .zena_logging import bind_contextvars, clear_contextvars, get_logger
 from .zena_postgres import (
     data_collection_postgres,
     data_user_info,
@@ -32,6 +33,8 @@ from .zena_postgres import (
 )
 from .zena_requests import fetch_crm_go_client_info
 from .zena_state import Context, State
+
+logger = get_logger()
 
 # Список сообщений из httpservice на запрещенные темы.
 # которые передаем клиенту через бота.
@@ -62,12 +65,17 @@ class VerifyInputMessage(AgentMiddleware):
     ) -> dict[str, Any] | None:
         """Обрабатывает стоп-команды и запрещённые сообщения."""
         try:
-            logger.info("===abefore_agent===VerifyInputMessage===")
-
             ctx = runtime.context or {}
             user_companychat = ctx.get("_user_companychat")
+
+            # Привязываем user_cc ко всем логам этого запроса
+            clear_contextvars()
+            bind_contextvars(user_cc=user_companychat)
+
+            logger.info("middleware.started", middleware="VerifyInputMessage")
+
             studio = ctx.get("_studio", False)
-            logger.info("studio: %s", studio)
+            logger.debug("config.studio", studio=studio)
 
 
             messages = state["messages"]
@@ -109,8 +117,8 @@ class VerifyInputMessage(AgentMiddleware):
                     "user_companychat": user_companychat,
                 }
 
-        except Exception as err:
-            logger.exception("VerifyInputMessage: %s", err)
+        except Exception:
+            logger.exception("middleware.error", middleware="VerifyInputMessage")
             return {
                 "messages": [AIMessage(content='Бот временно не работает')],
                 "jump_to": "end"
@@ -140,7 +148,7 @@ class GetDatabaseMiddleware(AgentMiddleware):
     ) -> dict[str, Any] | None:
         """Загружает данные из PostgreSQL и внешних API перед запуском агента."""
         try:
-            logger.info("===GetDatabaseMiddleware===")
+            logger.info("middleware.started", middleware="GetDatabase")
 
             ctx = runtime.context or {}
             access_token = ctx.get("_access_token")
@@ -169,7 +177,7 @@ class GetDatabaseMiddleware(AgentMiddleware):
                 data[key] = state_data.get(key) or data.get(key) or []
  
             mcp_port = data.get("mcp_port")
-            logger.info("mcp_port=%s", mcp_port)
+            logger.debug("config.mcp_port", mcp_port=mcp_port)
 
             if mcp_port == 5020:
                 # Режим опроса клиента.
@@ -185,7 +193,7 @@ class GetDatabaseMiddleware(AgentMiddleware):
                 if phone:
                     response = await fetch_crm_go_client_info(phone=phone)
                     success = bool(response.get("success", False))
-                    logger.info("GO lookup by phone success=%s", success)
+                    logger.info("crm.lookup", success=success)
 
                     onboarding = data.setdefault("onboarding", {})
                     onboarding["onboarding_status"] = success
@@ -196,8 +204,8 @@ class GetDatabaseMiddleware(AgentMiddleware):
                 **gathered,
             } 
 
-        except Exception as err:
-            logger.exception("GetDatabaseMiddleware error: %s", err)
+        except Exception:
+            logger.exception("middleware.error", middleware="GetDatabase")
             return {
                 "messages": [AIMessage(content="Бот временно не работает")],
                 "jump_to": "end",
@@ -214,7 +222,7 @@ class GetKeyWordMiddleware(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Ищет услуги по ключевым словам из промо-таблицы."""
-        logger.info("===GetKeyWordMiddleware===")
+        logger.info("middleware.started", middleware="GetKeyWord")
         try:
             channel_id = state["data"]["channel_id"]
 
@@ -224,10 +232,10 @@ class GetKeyWordMiddleware(AgentMiddleware):
             )
             last_message = _content_to_text(last_msg_content).strip()
 
-            logger.info("last_message: %s", last_message)
+            logger.debug("input.last_message", last_message=last_message)
 
             promo = await fetch_key_words(channel_id, last_message)
-            logger.info("promo: %s", promo)
+            logger.debug("keyword.promo_result", promo=promo)
 
             if not promo:
                 return None
@@ -236,14 +244,14 @@ class GetKeyWordMiddleware(AgentMiddleware):
             data['items_search'] = promo
             data['dialog_state'] = 'promo'
 
-            logger.info("data: %s", data)
+            logger.debug("state.data", data=data)
 
             return {
                 **data
             }
 
-        except Exception as err:
-            logger.exception("GetKeyWordMiddleware error: %s", err)
+        except Exception:
+            logger.exception("middleware.error", middleware="GetKeyWord")
             return {
                 "messages": [AIMessage(content="Бот временно не работает")],
                 "jump_to": "end",
@@ -263,7 +271,7 @@ class GetCRMGOMiddleware(AgentMiddleware):
     ) -> dict[str, Any] | None:
         """Читает данные onboarding из GO CRM."""
         try:
-            logger.info("===GetCRMGOMiddleware===")
+            logger.info("middleware.started", middleware="GetCRMGO")
 
             data = state.get("data", {})
             phone = data.get("phone")
@@ -276,17 +284,17 @@ class GetCRMGOMiddleware(AgentMiddleware):
             
             if not state.get("data", {}).get('onboarding'):
                 # Получаем и обрабатываем данные CRM
-                logger.info("fetch_crm_go_client_info")
+                logger.debug("crm.fetching")
                 raw_onboarding = await fetch_crm_go_client_info(phone=phone)
                 data["onboarding"] = raw_onboarding
 
-            logger.info("onboarding: %s", data['onboarding'])
+            logger.debug("crm.onboarding", onboarding=data["onboarding"])
 
             return {"data": data}
 
-        except Exception as err:
-            logger.exception("GetCRMGOMiddleware: %s", err)
+        except Exception:
+            logger.exception("middleware.error", middleware="GetCRMGO")
             return {
                 "messages": [AIMessage(content='Бот временно не работает')],
                 "jump_to": "end"
-            } 
+            }
