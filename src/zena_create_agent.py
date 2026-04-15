@@ -1,7 +1,6 @@
 """Модуль описывающий ноды графа."""
 
 import httpx
-import re
 
 from langchain.agents import create_agent
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -148,34 +147,3 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
         ]
     )
     return agent
-
-import asyncio
-async def main():
-    async def _get_tools(mcp_port: int) -> list[BaseTool]:
-        """Получение инструментов из MCP-сервера по выбранному порту."""
-
-        url = f"http://172.17.0.1:{mcp_port}/sse"
-        client = MultiServerMCPClient(
-            {
-                "company": {
-                    "transport": "sse",
-                    "url": url,
-                }
-            }
-        )
-        return await client.get_tools()
-
-    mcp_port = [5020]
-    for port in mcp_port:
-        tools = await _get_tools(port)
-
-        tools_name = [tool.name for tool in tools]
-        logger.info(f"create_agent_mcp tools ({port}): {tools_name}")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-
-
-# cd /home/copilot_superuser/petrunin/zena/langgraph
-# uv run python -m src.zena_create_agent
