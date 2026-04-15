@@ -9,7 +9,7 @@ from .zena_common import _content_to_text, _func_name
 from .zena_httpservice import sent_message_to_history
 
 
-class SaveResponceAgent(AgentMiddleware):
+class SaveResponseAgent(AgentMiddleware):
     
     async def aafter_agent(
         self,
@@ -18,7 +18,7 @@ class SaveResponceAgent(AgentMiddleware):
     ) -> dict[str, Any] | None:
         """Async logic to run after the model is called."""
 
-        logger.info("===after_agent===SaveResponceAgent===")
+        logger.info("===after_agent===SaveResponseAgent===")
         
         try:
             data = state.get('data', {})
@@ -48,9 +48,9 @@ class SaveResponceAgent(AgentMiddleware):
 
             # logger.info(f"payload: {payload}")
 
-            responce = await sent_message_to_history(**payload)
-            
-            if responce.get('status', 'not')=='ok':
+            response = await sent_message_to_history(**payload)
+
+            if response.get('status', 'not')=='ok':
                 logger.info(f"Ответ агента сохранен в postgres.")
             else:
                 logger.error(f"Ошибка сохранения ответа агента в postgres.")
@@ -58,7 +58,7 @@ class SaveResponceAgent(AgentMiddleware):
             return None
         
         except Exception as err:
-            logger.exception(f"SaveResponceAgent: {err}")
+            logger.exception(f"SaveResponseAgent: {err}")
             return None
         # content = _content_to_text(state['messages'][-1].content)
         # responce_mem = await memory.add(

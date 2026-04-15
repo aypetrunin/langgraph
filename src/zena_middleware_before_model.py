@@ -21,7 +21,7 @@ class TrimMessages(AgentMiddleware):
 
         logger.info("===before_model===TrimMessages===")
 
-        MAX_COUNT_MASSAGES = 20
+        MAX_COUNT_MESSAGES = 20
 
 
         # Проверка на не пустой список диалога.
@@ -29,16 +29,16 @@ class TrimMessages(AgentMiddleware):
         if not messages:
             return None
 
-        logger.info(f"Количество сообщений: {len(messages)}. Максимум: {MAX_COUNT_MASSAGES}")
+        logger.info(f"Количество сообщений: {len(messages)}. Максимум: {MAX_COUNT_MESSAGES}")
 
-        if len(messages) <= MAX_COUNT_MASSAGES:
+        if len(messages) <= MAX_COUNT_MESSAGES:
             return None
 
         first_msg = messages[0]
-        recent_messages = messages[-MAX_COUNT_MASSAGES:] if len(messages) % 2 == 0 else messages[-MAX_COUNT_MASSAGES-1:]
+        recent_messages = messages[-MAX_COUNT_MESSAGES:] if len(messages) % 2 == 0 else messages[-MAX_COUNT_MESSAGES-1:]
         new_messages = [first_msg] + recent_messages
 
-        logger.info(f"Количество сообщений обрезано до : {MAX_COUNT_MASSAGES} шт.")
+        logger.info(f"Количество сообщений обрезано до : {MAX_COUNT_MESSAGES} шт.")
 
         return {
             "messages": [
