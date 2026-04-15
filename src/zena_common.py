@@ -12,7 +12,6 @@
 
 import asyncio
 import inspect
-import logging
 import os
 import random
 from functools import wraps
@@ -23,15 +22,13 @@ from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from typing_extensions import Any, Awaitable, Callable, TypeVar
 
+from .zena_logging import get_logger, setup_logging
+
 T = TypeVar("T")
 
 # -------------------- Logging --------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+setup_logging()
+logger = get_logger()
 
 
 # -------------------- Загрузка .env (только для локальной разработки) ----------
@@ -120,13 +117,19 @@ def retry_async(
                 except exceptions as e:
                     if attempt == retries:
                         logger.exception(
-                            f"Последняя неудачная попытка {func.__name__}: {e}"
+                            "retry.exhausted",
+                            func=func.__name__,
+                            error=str(e),
                         )
                         raise
                     wait = (backoff**attempt) + random.uniform(0, jitter)
                     logger.warning(
-                        f"Ошибка в {func.__name__}: {e} | "
-                        f"попытка {attempt}/{retries} — повтор через {wait:.1f}s"
+                        "retry.attempt",
+                        func=func.__name__,
+                        error=str(e),
+                        attempt=attempt,
+                        retries=retries,
+                        wait_sec=round(wait, 1),
                     )
                     # Неблокирующее ожидание — не мешает другим корутинам
                     await asyncio.sleep(wait)
@@ -158,7 +161,6 @@ def _content_to_text(content: str | list[Any] | None) -> str:
     где оно было сформировано Langgraph Studio в закладке Chat или Graph.
     Особенность Langgraph Studio.
     """
-    # logger.info("_content_to_text")
     if isinstance(content, str):
         return content
     if isinstance(content, list) and content:
