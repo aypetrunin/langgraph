@@ -23,8 +23,11 @@ from langchain.agents.middleware import (
 )
 from langchain_core.tools.structured import StructuredTool
 
-from .zena_common import logger, model_4o, model_4o_mini
+from .zena_common import model_4o, model_4o_mini
 from .zena_google_doc import GoogleDocTemplateReader
+from .zena_logging import get_logger, timed_block
+
+logger = get_logger()
 
 
 class DynamicSystemPrompt(AgentMiddleware):
@@ -38,13 +41,11 @@ class DynamicSystemPrompt(AgentMiddleware):
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse:
         """Рендерит системный промпт и передаёт обновлённый запрос обработчику."""
-        logger.info("==awrap_model_call==DynamicSystemPrompt==")
+        logger.info("middleware.started", middleware="DynamicSystemPrompt")
 
         # Берём data из state, но делаем копию, чтобы избежать неожиданных сайд-эффектов
         state = request.state or {}
         data = dict(state.get("data", {}) or {})
-
-        # logger.info(f"data: {data}")
 
         env_name = (os.getenv("ENV", "prod") or "prod").strip().lower()
         is_dev = env_name == "dev"
@@ -61,10 +62,10 @@ class DynamicSystemPrompt(AgentMiddleware):
         # Важно: если дальше кто-то читает request.state["data"], обновим state тоже
         request.state["data"] = data
 
-        # Логи: лучше не печатать весь prompt в prod
-        self._log_prompt(system_prompt=system_prompt, data=data, is_dev=is_dev)
+        self._log_prompt(system_prompt=system_prompt, data=data)
 
-        return await handler(request.override(system_prompt=system_prompt))
+        async with timed_block("llm.openai"):
+            return await handler(request.override(system_prompt=system_prompt))
 
     async def _load_template_source(self, request: ModelRequest, data: dict, is_dev: bool) -> str:
         """Определяет источник шаблона и возвращает его содержимое.
@@ -115,21 +116,11 @@ class DynamicSystemPrompt(AgentMiddleware):
 
         return doc_url
 
-
-    def _log_prompt(self, system_prompt: str, data: dict, is_dev: bool) -> None:
-        dialog_state = data.get("dialog_state")
-        logger.info("dialog_state=%r", dialog_state)
-
+    def _log_prompt(self, system_prompt: str, data: dict) -> None:
         prompt_len = len(system_prompt)
         prompt_hash = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()[:12]
-
-        if is_dev:
-            # В dev можно позволить себе больше, но всё равно осторожно:
-            logger.info("system_prompt(len=%s, sha=%s):\n%s", prompt_len, prompt_hash, system_prompt[:300])
-        else:
-            # В prod — только метаданные
-            logger.info("system_prompt rendered (len=%s, sha=%s)", prompt_len, prompt_hash)
-
+        logger.info("prompt.rendered", length=prompt_len, hash=prompt_hash)
+        logger.debug("prompt.content", content=system_prompt[:300])
 
 
 class ToolSelectorMiddleware(AgentMiddleware):
@@ -200,26 +191,25 @@ class ToolSelectorMiddleware(AgentMiddleware):
     # MAIN: select tools
     # =========================================================================
     async def _select_relevant_tools(self, state: dict, tools: list[StructuredTool]) -> list[StructuredTool]:
-        logger.info("===wrap_model_call===_select_relevant_tools===")
+        logger.info("middleware.started", middleware="ToolSelector")
 
         data = state.get("data", {}) or {}
         mcp_port = data.get("mcp_port")
         dialog_state = (data.get("dialog_state") or "new").strip()
 
-        logger.info("dialog_state=%s", dialog_state)
-        logger.info("mcp_port=%s", mcp_port)
-        logger.info("all_tools=%s", [t.name for t in tools])
+        logger.debug("selector.state", dialog_state=dialog_state, mcp_port=mcp_port)
+        logger.debug("selector.all_tools", tools=[t.name for t in tools])
 
         allowed = self._build_allowed_tools(mcp_port=mcp_port, dialog_state=dialog_state, data=data)
         filtered = [tool for tool in tools if tool.name in allowed]
 
-        logger.info("allowed_tools=%s", sorted(allowed))
-        logger.info("tools_filtered=%s", [t.name for t in filtered])
+        logger.debug("selector.allowed", tools=sorted(allowed))
+        logger.info("selector.filtered", tools_count=len(filtered), tools=[t.name for t in filtered])
         return filtered
 
     def _build_allowed_tools(self, *, mcp_port: int | None, dialog_state: str, data: dict) -> set[str]:
-        logger.info("_build_allowed_tools")
-        
+        logger.debug("selector.building_allowed")
+
         base = set(self.GLOBAL_TOOLS)
 
         if mcp_port is None:
@@ -235,9 +225,9 @@ class ToolSelectorMiddleware(AgentMiddleware):
 
         if mcp_port in self.CLASSIC_PORTS:
             allowed = self._allowed_for_classic_ports(dialog_state, data, base)
-            logger.info("allowed: %s", allowed)
+            logger.debug("selector.built", allowed=sorted(allowed))
             responce = self._apply_guards(dialog_state, allowed, data)
-            logger.info("responce _apply_guards: %s", responce)
+            logger.debug("selector.guards_applied", result=responce)
             return responce
 
         return self._apply_guards(dialog_state, base, data)
@@ -436,7 +426,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
     # =========================================================================
     async def awrap_model_call(self, request, handler):
         """Фильтрует инструменты и выбирает модель перед передачей запроса обработчику."""
-        logger.info("===wrap_model_call===ToolSelectorMiddleware===")
+        logger.info("middleware.started", middleware="ToolSelectorMiddleware")
 
         request.tools = await self._select_relevant_tools(request.state, request.tools)
         request.model = await self._select_model(request.state)
@@ -448,19 +438,13 @@ class ToolSelectorMiddleware(AgentMiddleware):
 async def personalized_prompt(request: ModelRequest) -> str:
     """Формирование промпта."""
     logger.info("==dynamic_prompt==")
-    # logger.info(f'state: {request.state}')
-    # logger.info(f'state: {request.state["data"]}')
     tpl_system_prompt = request.state["data"]["template_prompt_system"]
-    # tpl_system_prompt = 'prompt_agent_of_service_selection_v1.md'
     tpl_path = Path(__file__).parent / "template" / tpl_system_prompt
 
     async with aiofiles.open(tpl_path, encoding="utf-8") as f:
         source = await f.read()
     data = request.state.get("data", {})
-    # data['item_selected'] = request.state.get("item_selected", [])
-    # logger.info(f'\nstate: {request.state}')
     system_prompt = Template(source).render(**data)
-    # system_prompt = Template(source).render(**request.state.get("data", {}))
     logger.info("system_prompt:\n%s", system_prompt)
 
     return system_prompt
