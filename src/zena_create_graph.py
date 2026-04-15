@@ -1,9 +1,10 @@
 """Создание системых графов/шаблонов для каждой компании."""
 
-import os
 import asyncio
+import os
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from .zena_create_agent import create_agent_mcp
 from .zena_state import Context, InputState, OutputState, State
@@ -11,7 +12,6 @@ from .zena_state import Context, InputState, OutputState, State
 
 async def create_agent_graph(port: int):
     """Универсальная фабрика для LangGraph CLI."""
-    
     agent = await create_agent_mcp(mcp_port=port)
     
     workflow = StateGraph(
@@ -36,11 +36,36 @@ MCP_PORT_VALENTINA = os.getenv("MCP_PORT_VALENTINA") # 5021 / 15021
 MCP_PORT_MARINA = os.getenv("MCP_PORT_MARINA") # 5024 / 15024
 MCP_PORT_EGOISTKA = os.getenv("MCP_PORT_EGOISTKA") # 5017 / 15017
 
-graph_sofia = asyncio.run(create_agent_graph(MCP_PORT_SOFIA))
-graph_anisa = asyncio.run(create_agent_graph(MCP_PORT_ANISA))
-graph_annitta = asyncio.run(create_agent_graph(MCP_PORT_ANNITTA))
-graph_anastasia = asyncio.run(create_agent_graph(MCP_PORT_ANASTASIA))
-graph_alena = asyncio.run(create_agent_graph(MCP_PORT_ALENA))
-graph_valentina = asyncio.run(create_agent_graph(MCP_PORT_VALENTINA))
-graph_marina = asyncio.run(create_agent_graph(MCP_PORT_MARINA))
-graph_egoistka = asyncio.run(create_agent_graph(MCP_PORT_EGOISTKA))
+async def _create_all_graphs() -> tuple[
+    CompiledStateGraph,
+    CompiledStateGraph,
+    CompiledStateGraph,
+    CompiledStateGraph,
+    CompiledStateGraph,
+    CompiledStateGraph,
+    CompiledStateGraph,
+    CompiledStateGraph,
+]:
+    """Create all agent graphs in parallel."""
+    return await asyncio.gather(
+        create_agent_graph(MCP_PORT_SOFIA),
+        create_agent_graph(MCP_PORT_ANISA),
+        create_agent_graph(MCP_PORT_ANNITTA),
+        create_agent_graph(MCP_PORT_ANASTASIA),
+        create_agent_graph(MCP_PORT_ALENA),
+        create_agent_graph(MCP_PORT_VALENTINA),
+        create_agent_graph(MCP_PORT_MARINA),
+        create_agent_graph(MCP_PORT_EGOISTKA),
+    )
+
+
+(
+    graph_sofia,
+    graph_anisa,
+    graph_annitta,
+    graph_anastasia,
+    graph_alena,
+    graph_valentina,
+    graph_marina,
+    graph_egoistka,
+) = asyncio.run(_create_all_graphs())
