@@ -1,34 +1,34 @@
 """Модуль описывающий ноды графа."""
 
-import httpx
+import os
 
 from langchain.agents import create_agent
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_core.tools.base import BaseTool
-from langgraph.graph.state import CompiledStateGraph
-
 from langchain.agents.middleware import (
     ClearToolUsesEdit,
-    ToolRetryMiddleware,
-    SummarizationMiddleware,
     ContextEditingMiddleware,
-    LLMToolSelectorMiddleware,
     ModelFallbackMiddleware,
-    PIIMiddleware,
     ToolCallLimitMiddleware,
 )
+from langchain_core.tools.base import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.graph.state import CompiledStateGraph
 
+from .zena_common import logger, model_4o_mini, model_4o_mini_reserv
+from .zena_middleware_after_agent import (
+    ResetData,
+)
+from .zena_middleware_after_model import (
+    GetCountToken,
+    GetCRMGOOnboardStage,
+    GetToolArgs,
+)
 
-from .zena_common import logger, model_4o, model_4o_mini, model_4o_mini_reserv
-from .zena_state import State, Context
 # from .zena_memory import memory
-
 from .zena_middleware_before_agent import (
-    VerifyInputMessage,
     GetDatabaseMiddleware,
-    GetCRMGOMiddleware,
     GetKeyWordMiddleware,
     # DynamicMCPPortMiddleware,
+    VerifyInputMessage,
 )
 from .zena_middleware_wrap_model import (
     DynamicSystemPrompt,
@@ -37,29 +37,15 @@ from .zena_middleware_wrap_model import (
 from .zena_middleware_wrap_tool import (
     ToolMonitoringMiddleware,
 )
-from .zena_middleware_after_agent import (
-    SaveResponseAgent,
-    ResetData,
-)
-from .zena_middleware_before_model import (
-    # SaveResultToolsMiddleware,
-    TrimMessages,
-)
-from .zena_middleware_after_model import (
-    GetCountToken,
-    GetToolArgs,
-    GetCRMGOOnboardStage,
-)
-
-from .zena_state import State
+from .zena_state import Context, State
 
 
 async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
 
     async def _get_tools(mcp_port: int) -> list[BaseTool]:
         """Получение инструментов из MCP-сервера по выбранному порту."""
-
-        url = f"http://172.17.0.1:{mcp_port}/sse"
+        mcp_host = os.getenv("MCP_HOST", "172.17.0.1")
+        url = f"http://{mcp_host}:{mcp_port}/sse"
         client = MultiServerMCPClient(
             {
                 "company": {

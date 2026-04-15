@@ -1,12 +1,13 @@
+import os
 from typing import Any
 
-from langgraph.runtime import Runtime
 from langchain.agents.middleware import AgentMiddleware
 from langchain.messages import RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langgraph.runtime import Runtime
 
 from .zena_common import logger
-from .zena_state import State, Context
+from .zena_state import Context, State
 
 
 class TrimMessages(AgentMiddleware):
@@ -18,10 +19,9 @@ class TrimMessages(AgentMiddleware):
             runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Ограничение количества сообщений для модели."""
-
         logger.info("===before_model===TrimMessages===")
 
-        MAX_COUNT_MESSAGES = 20
+        MAX_COUNT_MESSAGES = int(os.getenv("MAX_MESSAGES_HISTORY", "20"))
 
 
         # Проверка на не пустой список диалога.
