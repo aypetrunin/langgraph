@@ -266,11 +266,12 @@ class ToolSelectorMiddleware(AgentMiddleware):
           - слоты для переноса => нужен desired_date
           - финальный перенос => нужны desired_date + desired_time
         """
-        logger.info(
-            "DEBUG keys: office_id=%r desired_date=%r date=%r",
-            data.get("office_id"), data.get("desired_date"), data.get("date")
+        logger.debug(
+            "selector.guard_keys",
+            office_id=data.get("office_id"),
+            desired_date=data.get("desired_date"),
+            date=data.get("date"),
         )
-
 
         # -----------------------------
         # A) Classic funnel guards
@@ -278,7 +279,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
         if dialog_state in ("remember", "available_time"):
             # Без офиса и даты спрашивать слоты бессмысленно
             if not self._has_office_and_date(data):
-                logger.info("_has_office_and_date == False")
+                logger.debug("selector.no_office_or_date")
                 allowed.discard("zena_avaliable_time_for_master")
                 allowed.discard("zena_available_time_for_master_list")
 
@@ -291,7 +292,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
         # B) Existing records management via user_records
         # -----------------------------
         if self._has_user_records(data):
-            logger.info("Ветка В")
+            logger.debug("selector.branch_records_management")
             # 1) Отмена — доступна сразу, если есть записи
             allowed.add("zena_record_delete")
 
@@ -332,12 +333,11 @@ class ToolSelectorMiddleware(AgentMiddleware):
 
     @staticmethod
     def _has_office_and_date(data: dict) -> bool:
-        logger.info("_has_office_and_date")
         office_id = str(data.get("office_id") or "").strip()
         desired_date = str(data.get("desired_date") or "").strip()
-        responce = bool(office_id and desired_date)
-        logger.info("responce: %s", responce)
-        return responce
+        result = bool(office_id and desired_date)
+        logger.debug("selector.has_office_and_date", result=result)
+        return result
 
     @staticmethod
     def _has_desired_time(data: dict) -> bool:
@@ -437,7 +437,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
 @dynamic_prompt
 async def personalized_prompt(request: ModelRequest) -> str:
     """Формирование промпта."""
-    logger.info("==dynamic_prompt==")
+    logger.info("prompt.dynamic_started")
     tpl_system_prompt = request.state["data"]["template_prompt_system"]
     tpl_path = Path(__file__).parent / "template" / tpl_system_prompt
 
@@ -445,6 +445,6 @@ async def personalized_prompt(request: ModelRequest) -> str:
         source = await f.read()
     data = request.state.get("data", {})
     system_prompt = Template(source).render(**data)
-    logger.info("system_prompt:\n%s", system_prompt)
+    logger.debug("prompt.content", content=system_prompt[:300])
 
     return system_prompt

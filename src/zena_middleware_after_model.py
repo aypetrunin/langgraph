@@ -32,18 +32,18 @@ class GetCRMGOOnboardStage(AgentMiddleware):
         logger.info("middleware.started", middleware="GetCRMGOOnboardStage")
 
         data = state.get("data", {})
-        # logger.info(f'data: {data}')
+
         
         if data.get("mcp_port") != 5020:
             return None
 
         messages: list[AnyMessage] | None = state.get("messages")
-        # logger.info(f'messages: {messages}')
+
         if not messages:
             return None
         
         last_message = messages[-1]
-        # logger.info(f'last_message: {last_message}')
+
         if not isinstance(last_message, AIMessage):
             return None
 
@@ -53,7 +53,7 @@ class GetCRMGOOnboardStage(AgentMiddleware):
             return None
 
         onboarding = data.get("onboarding", {}).get("onboarding_status")
-        # logger.info(f'onboarding: {onboarding}')
+
         if onboarding is None or onboarding:
             return None
 
@@ -61,7 +61,6 @@ class GetCRMGOOnboardStage(AgentMiddleware):
         if onboarding_stage < 6:
             data["onboarding"]["onboarding_stage"] += 1
  
-        # logger.info(f'onboarding_stage: {data["onboarding"]["onboarding_stage"]}')
 
         return {
             "data": data
