@@ -33,6 +33,7 @@ async def fetch_personal_info(user_id: int) -> dict[str, Any]:
 
 
 def analyze_response(response: dict) -> list:
+    """Анализирует ответ API и возвращает отфильтрованный список записей."""
     # 1. Проверяем success верхнего уровня
     if not response.get('success'):
         return []
@@ -257,14 +258,15 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
 
 
 
-async def main():
-    phone = "799967382561"
+async def main() -> None:
+    """Точка входа для ручного тестирования запросов."""
+    _phone = "799967382561"
     # response = await fetch_crm_go_client_info(
-    #     phone=phone,
+    #     phone=_phone,
     # )
-    response = await fetch_personal_records(user_companychat=145, channel_id = 1)
-    # response = await fetch_masters_info(channel_id = 21)
-    # print(response)
+    _response = await fetch_personal_records(user_companychat=145, channel_id = 1)
+    # _response = await fetch_masters_info(channel_id = 21)
+    # print(_response)
 
 
 if __name__ == "__main__":

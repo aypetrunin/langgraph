@@ -52,13 +52,15 @@ PREDEFINED_DEL_PERSONAL_DATA = "phone"
 
 
 class VerifyInputMessage(AgentMiddleware):
+    """Проверяет входящее сообщение перед запуском агента."""
+
     @hook_config(can_jump_to=["end"])
     async def abefore_agent(
         self,
         state: State,
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
-        
+        """Обрабатывает стоп-команды и запрещённые сообщения."""
         try:
             logger.info("===abefore_agent===VerifyInputMessage===")
 
@@ -136,6 +138,7 @@ class GetDatabaseMiddleware(AgentMiddleware):
         state: State,
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
+        """Загружает данные из PostgreSQL и внешних API перед запуском агента."""
         try:
             logger.info("===GetDatabaseMiddleware===")
 
@@ -210,7 +213,7 @@ class GetKeyWordMiddleware(AgentMiddleware):
         state: State,
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
-
+        """Ищет услуги по ключевым словам из промо-таблицы."""
         logger.info("===GetKeyWordMiddleware===")
         try:
             channel_id = state["data"]["channel_id"]

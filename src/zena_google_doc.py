@@ -179,6 +179,14 @@ class GoogleDocTemplateReader:
         cache_ttl_sec: int = 60,
         meta_check_ttl_sec: int = 10,
     ) -> None:
+        """Инициализирует клиент для работы с Google Doc по URL.
+
+        Args:
+            doc_url: URL Google-документа.
+            service_account_file: Путь к файлу сервисного аккаунта.
+            cache_ttl_sec: Время жизни кэша содержимого документа в секундах.
+            meta_check_ttl_sec: Интервал проверки метаданных документа в секундах.
+        """
         self.doc_url = doc_url
         self.service_account_file = service_account_file
         self.cache_ttl_sec = cache_ttl_sec

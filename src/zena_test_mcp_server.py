@@ -37,7 +37,8 @@ async def _get_tools(mcp_port: int) -> List[BaseTool]:
             continue
     raise Exception(f"Все адреса для порта {mcp_port} недоступны")
 
-async def main():
+async def main() -> None:
+    """Проверяет доступность инструментов на всех MCP-портах."""
     mcp_ports = [5001, 5002, 5005, 5006, 5007, 5020]
     for port in mcp_ports:
         try:

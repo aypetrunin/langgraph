@@ -26,6 +26,7 @@ class GetCRMGOOnboardStage(AgentMiddleware):
         state: State,
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
+        """Инкрементирует onboarding_stage после ответа модели."""
         logger.info("=== after_model: GetCRMGOOnboardStage  ===")
 
         data = state.get("data", {})
@@ -73,6 +74,7 @@ class GetToolArgs(AgentMiddleware):
         state: State,
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
+        """Извлекает аргументы вызовов инструментов из последнего AIMessage."""
         logger.info("=== after_model: GetToolArgs ===")
 
         messages: list[AnyMessage] | None = state.get("messages")
@@ -107,6 +109,7 @@ class GetCountToken(AgentMiddleware):
         state: State,
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
+        """Подсчитывает токены из usage_metadata и накапливает их в state."""
         logger.info("===after_model===CountToken===")
 
         messages: list[BaseMessage] | None = cast(

@@ -35,6 +35,8 @@ PostProcessor = Callable[["Envelope", ToolCallRequest], Awaitable[Any]]
 
 @dataclass(frozen=True)
 class Envelope:
+    """Унифицированная обёртка результата MCP-инструмента."""
+
     success: bool
     data: Any = None
     code: str | None = None
@@ -42,14 +44,17 @@ class Envelope:
     raw: Any = None  # исходный распарсенный контент (для дебага)
 
     def is_ok(self) -> bool:
+        """Возвращает True, если вызов инструмента завершился успешно."""
         return bool(self.success)
 
     def is_err(self) -> bool:
+        """Возвращает True, если вызов инструмента завершился ошибкой."""
         return not bool(self.success)
 
 
 def _parse_tool_content(result: ToolMessage) -> Any:
-    """ToolMessage.content обычно строка.
+    """Разбирает содержимое ToolMessage в dict, list или строку.
+
     Возвращает:
       - dict/list/... если удалось json.loads
       - иначе str (raw_content)
@@ -65,7 +70,9 @@ def _parse_tool_content(result: ToolMessage) -> Any:
 
 
 def _normalize_envelope(parsed: Any, *, tool_name: str | None = None) -> Envelope:
-    """ЖЁСТКИЙ контракт (обязательный):
+    """Нормализует результат инструмента в Envelope по жёсткому контракту.
+
+    Контракт (обязательный):
       ok:  {"success": True,  "data": ...}
       err: {"success": False, "code": "...", "error": "..."}
 
@@ -100,11 +107,13 @@ def _normalize_envelope(parsed: Any, *, tool_name: str | None = None) -> Envelop
 
 
 def _port_allowed_default(request: ToolCallRequest) -> bool:
+    """Проверяет, разрешён ли порт для стандартного набора инструментов."""
     data = request.state.get("data") or {}
     return data.get("mcp_port") in AVAILIABLE_PORT_DEFAULT
 
 
 def _port_allowed_alena(request: ToolCallRequest) -> bool:
+    """Проверяет, разрешён ли порт для инструментов Алены."""
     data = request.state.get("data") or {}
     return data.get("mcp_port") in AVAILIABLE_PORT_ALENA
 
@@ -120,6 +129,7 @@ async def _run_template(
     require_success: bool = True,
 ) -> Any:
     """Общий шаблон: port_guard + envelope + (success?) + typecheck(data) + truthy(data) + on_ok.
+
     Возвращает env.data, либо None.
     """
     logger.info('_run_template')
@@ -152,6 +162,7 @@ async def zena_default(
     require_truthy_data: bool = True,
     require_success: bool = True,
 ) -> Any:
+    """Запускает шаблон постобработки для стандартных портов."""
     return await _run_template(
         request=request,
         env=env,
@@ -172,6 +183,7 @@ async def zena_alena(
     require_truthy_data: bool = True,
     require_success: bool = True,
 ) -> Any:
+    """Запускает шаблон постобработки для порта Алены."""
     return await _run_template(
         request=request,
         env=env,
@@ -184,6 +196,7 @@ async def zena_alena(
 
 
 def parse_item(item: dict) -> dict:
+    """Преобразует сырой элемент продукта в унифицированный словарь."""
     keys_map = {
         "item_id": "product_id",
         "item_name": "product_name",
@@ -198,6 +211,7 @@ def parse_item(item: dict) -> dict:
 # =======================
 
 async def pp_available_time_for_master(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сохраняет доступное время мастера в state."""
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
         data.setdefault("available_time", [])
         data["available_time"].append(tools_data)
@@ -208,6 +222,7 @@ async def pp_available_time_for_master(env: Envelope, request: ToolCallRequest) 
 
 
 async def pp_available_time_for_master_list(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сохраняет список доступного времени и последовательностей в state."""
     logger.info('pp_available_time_for_master_list')
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
         if len(tools_data) < 2:
@@ -222,6 +237,7 @@ async def pp_available_time_for_master_list(env: Envelope, request: ToolCallRequ
 
 
 async def pp_record_time(env: Envelope, request: ToolCallRequest) -> Any:
+    """Обновляет state после успешной записи клиента на услугу."""
     logger.info('pp_record_time')
     def on_ok(data: dict, tools_data: dict, request: ToolCallRequest) -> None:
         tool_args = request.tool_call.get("args") or {}
@@ -243,6 +259,7 @@ async def pp_record_time(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_recommendations(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сбрасывает state диалога после показа рекомендаций."""
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         data.update(
             {
@@ -270,6 +287,7 @@ async def pp_recommendations(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_call_administrator(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сбрасывает state диалога после вызова администратора."""
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         data.update(
             {
@@ -297,6 +315,7 @@ async def pp_call_administrator(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_records(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сохраняет список записей клиента в state."""
     logger.info('pp_records')
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
         if tools_data:
@@ -317,6 +336,7 @@ async def pp_records(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_record_delete(env: Envelope, request: ToolCallRequest) -> Any:
+    """Очищает записи клиента в state после успешной отмены."""
     logger.info('pp_record_delete')
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         data["user_records"] = []
@@ -334,6 +354,7 @@ async def pp_record_delete(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_record_reschedule(env: Envelope, request: ToolCallRequest) -> Any:
+    """Очищает записи клиента в state после успешного переноса."""
     logger.info('pp_record_reschedule')
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         data["user_records"] = []
@@ -351,6 +372,7 @@ async def pp_record_reschedule(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_remember_office(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сохраняет идентификатор офиса в state."""
     def on_ok(data: dict, tools_data: dict, request: ToolCallRequest) -> None:
         office_id = tools_data.get("office_id")
         if office_id is not None:
@@ -367,6 +389,7 @@ async def pp_remember_office(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_remember_desired_date(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сохраняет желаемую дату записи в state."""
     def on_ok(data: dict, tools_data: dict, request: ToolCallRequest) -> None:
         desired_date = tools_data.get("desired_date")
         if desired_date is not None:
@@ -383,6 +406,7 @@ async def pp_remember_desired_date(env: Envelope, request: ToolCallRequest) -> A
 
 
 async def pp_remember_desired_time(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сохраняет желаемое время записи в state."""
     def on_ok(data: dict, tools_data: dict, request: ToolCallRequest) -> None:
         desired_time = tools_data.get("desired_time")
         if desired_time is not None:
@@ -399,6 +423,7 @@ async def pp_remember_desired_time(env: Envelope, request: ToolCallRequest) -> A
 
 
 async def pp_remember_master(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сохраняет данные выбранного мастера в state."""
     def on_ok(data: dict, tools_data: dict, request: ToolCallRequest) -> None:
         master_id = tools_data.get("master_id")
         if master_id:
@@ -418,6 +443,7 @@ async def pp_remember_master(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_product_remember(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сохраняет выбранные продукты в state и возвращает их список."""
     items_out: list[dict] = []
 
     logger.info('pp_product_remember')
@@ -445,6 +471,7 @@ async def pp_product_remember(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_product_search(env: Envelope, request: ToolCallRequest) -> Any:
+    """Добавляет найденные продукты в items_search и возвращает новые элементы."""
     added_items: list[dict] = []
 
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
@@ -514,6 +541,7 @@ TOOL_POSTPROCESSORS_5007: dict[str, PostProcessor] = {
 # =======================
 
 async def pp_get_client_lessons(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сохраняет список занятий клиента Алены в state."""
     def on_ok(data: dict, tools_data: dict, request: ToolCallRequest) -> None:
         data["dialog_state"] = "selecting"
         data["items_search"] = tools_data
@@ -522,6 +550,7 @@ async def pp_get_client_lessons(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_remember_lesson_id(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сохраняет выбранное занятие клиента в state и возвращает его."""
     selected: Any = None
 
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
@@ -542,6 +571,7 @@ async def pp_remember_lesson_id(env: Envelope, request: ToolCallRequest) -> Any:
 
 
 async def pp_update_client_lesson(env: Envelope, request: ToolCallRequest) -> Any:
+    """Сбрасывает dialog_state после успешного обновления занятия клиента."""
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         data["dialog_state"] = "new"
 
@@ -556,6 +586,7 @@ async def pp_update_client_lesson(env: Envelope, request: ToolCallRequest) -> An
 
 
 async def pp_update_client_info(env: Envelope, request: ToolCallRequest) -> Any:
+    """Обновляет статус онбординга клиента в state."""
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         data.setdefault("onboarding", {})
         data["onboarding"]["onboarding_status"] = True
@@ -579,6 +610,7 @@ TOOL_POSTPROCESSORS_ALENA: dict[str, PostProcessor] = {
 
 
 def _get_registry_for_request(request: ToolCallRequest) -> dict[str, PostProcessor]:
+    """Возвращает реестр постпроцессоров, соответствующий порту запроса."""
     data = request.state.get("data") or {}
     port = data.get("mcp_port")
     if port in AVAILIABLE_PORT_ALENA:
@@ -587,11 +619,14 @@ def _get_registry_for_request(request: ToolCallRequest) -> dict[str, PostProcess
 
 
 class ToolMonitoringMiddleware(AgentMiddleware):
+    """Middleware: разбирает результаты MCP-инструментов и запускает постпроцессоры."""
+
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
+        """Перехватывает вызов инструмента, нормализует результат и применяет постпроцессор."""
         tool_name = request.tool_call.get("name")
         tool_args = request.tool_call.get("args")
 

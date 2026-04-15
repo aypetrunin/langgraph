@@ -1,5 +1,5 @@
 # zena_request_masters_cache.py
-"""КЕШ МАСТЕРОВ (вариант B: stale-while-revalidate, обновление раз в час)
+"""КЕШ МАСТЕРОВ (вариант B: stale-while-revalidate, обновление раз в час).
 
 Задача:
 - Данные по мастерам можно обновлять редко (раз в час).
@@ -83,6 +83,7 @@ def _mem_set(key: str, value: str, ttl_seconds: int) -> None:
 
 async def _try_acquire_mem_lock() -> bool:
     """Пытаемся захватить asyncio.Lock без ожидания.
+
     Если занято — сразу False.
     """
     try:
@@ -105,7 +106,8 @@ def _normalize_redis_url(url: str | None) -> str | None:
 
 
 def resolve_redis_url() -> str:
-    """Два режима:
+    """Два режима.
+
     - IS_DOCKER=1: берем REDIS_URI (если задан) иначе redis://langgraph-redis:6379
     - local: берем REDIS_URI только если он адекватный, иначе redis://localhost:6379
     """
@@ -131,6 +133,7 @@ _redis: redis.Redis | None = None
 
 async def get_redis_safe() -> redis.Redis | None:
     """Возвращает Redis клиент или None, если Redis недоступен.
+
     Кеш не должен валить основную логику.
     """
     global _redis
@@ -180,6 +183,7 @@ end
 
 async def _try_acquire_lock(r: redis.Redis, key: str) -> str | None:
     """Пытаемся взять лок ОДИН раз (без ожидания), потому что это фон.
+
     Если лок не взяли — значит кто-то уже обновляет.
     """
     token = str(uuid.uuid4())
@@ -216,7 +220,8 @@ def _extract_updated_at(meta_json: str | None) -> int:
 
 
 def _extract_position(staff_item: dict[str, Any]) -> str | None:
-    """Position может приходить:
+    """Position может приходить в разных форматах.
+
     - str
     - dict {"title": "..."}
     - None
@@ -294,7 +299,8 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
 # Redis background refresh
 # =========================
 async def _refresh_in_background_redis_with_token(r: redis.Redis, channel_id: int | None, token: str) -> None:
-    """Фоновое обновление (лок уже взят):
+    """Фоновое обновление, лок уже взят.
+
     - тянем origin и перезаписываем кеш+meta
     - отпускаем лок
     """
@@ -310,7 +316,8 @@ async def _refresh_in_background_redis_with_token(r: redis.Redis, channel_id: in
 
 
 async def _write_cache_redis(r: redis.Redis, channel_id: int | None, masters: list[dict[str, Any]]) -> None:
-    """Пишем два ключа:
+    """Пишем два ключа в Redis.
+
     - data_key: JSON с мастерами
     - meta_key: {"updated_at": epoch}
     Оба с длинным TTL (чтобы не пропадали внезапно).
@@ -333,7 +340,8 @@ async def _write_cache_redis(r: redis.Redis, channel_id: int | None, masters: li
 # Memory fallback (stale-while-revalidate)
 # =========================
 async def _fetch_masters_memory_fallback(channel_id: int | None) -> list[dict[str, Any]]:
-    """Если Redis недоступен:
+    """Если Redis недоступен, используем in-memory fallback.
+
     - используем in-memory два ключа (data/meta) так же, как в Redis
     - фон-обновление делаем через asyncio.create_task с локом на уровне процесса
       (лок берём ДО create_task — чтобы не плодить таски)
@@ -370,6 +378,7 @@ async def _fetch_masters_memory_fallback(channel_id: int | None) -> list[dict[st
 
 async def _refresh_in_background_mem_locked(channel_id: int | None) -> None:
     """Фоновое обновление в памяти.
+
     Предполагается, что _mem_lock уже захвачен (без ожидания) до create_task.
     """
     try:
@@ -403,8 +412,7 @@ def _write_cache_mem(channel_id: int | None, masters: list[dict[str, Any]]) -> N
 # Origin fetch
 # =========================
 async def _fetch_origin(channel_id: int | None) -> list[dict[str, Any]]:
-    """Реальный вызов внешнего сервиса.
-    """
+    """Реальный вызов внешнего сервиса."""
     url = "https://httpservice.ai2b.pro/appointments/yclients/staff/actual"
 
     OFFICE_IDS: dict[int, list[int]] = {

@@ -28,6 +28,8 @@ from .zena_google_doc import GoogleDocTemplateReader
 
 
 class DynamicSystemPrompt(AgentMiddleware):
+    """Middleware: загружает системный промпт из Google Docs или файла и рендерит через Jinja2."""
+
     _readers: dict[str, GoogleDocTemplateReader] = {}
 
     async def awrap_model_call(
@@ -35,6 +37,7 @@ class DynamicSystemPrompt(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse:
+        """Рендерит системный промпт и передаёт обновлённый запрос обработчику."""
         logger.info("==awrap_model_call==DynamicSystemPrompt==")
 
         # Берём data из state, но делаем копию, чтобы избежать неожиданных сайд-эффектов
@@ -64,7 +67,9 @@ class DynamicSystemPrompt(AgentMiddleware):
         return await handler(request.override(system_prompt=system_prompt))
 
     async def _load_template_source(self, request: ModelRequest, data: dict, is_dev: bool) -> str:
-        """Правило выбора источника:
+        """Определяет источник шаблона и возвращает его содержимое.
+
+        Правило выбора источника:
         - Если есть URL (контекст или data) — читаем Google Doc
           (в dev можно брать URL и из template_prompt_system, если он выглядит как URL)
         - Иначе читаем файл template_prompt_system из template/
@@ -262,7 +267,9 @@ class ToolSelectorMiddleware(AgentMiddleware):
     # GUARDS
     # =========================================================================
     def _apply_guards(self, dialog_state: str, allowed: set[str], data: dict) -> set[str]:
-        """A) Classic funnel guards (твои правила записи)
+        """Применяет ограничения доступности инструментов по правилам воронки и управления записями.
+
+        A) Classic funnel guards (правила записи)
         B) Records management guards (просмотр/отмена/перенос)
 
         ВАЖНО: в ветке B мы теперь контролируем BOTH desired_date и desired_time:
@@ -326,8 +333,9 @@ class ToolSelectorMiddleware(AgentMiddleware):
 
     @staticmethod
     def _has_desired_date(data: dict) -> bool:
-        """desired_date — дата, на которую пользователь хочет перенести.
-        Обычно хранится как строка (например "2026-01-28" или "28.01.2026").
+        """Проверяет наличие желаемой даты переноса в данных диалога.
+
+        desired_date обычно хранится как строка (например "2026-01-28" или "28.01.2026").
         """
         d = str(data.get("desired_date") or "").strip()
         return bool(d)
@@ -427,6 +435,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
     # Middleware entry
     # =========================================================================
     async def awrap_model_call(self, request, handler):
+        """Фильтрует инструменты и выбирает модель перед передачей запроса обработчику."""
         logger.info("===wrap_model_call===ToolSelectorMiddleware===")
 
         request.tools = await self._select_relevant_tools(request.state, request.tools)
