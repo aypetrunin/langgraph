@@ -10,8 +10,12 @@ import aiohttp
 from typing_extensions import Any
 
 from .zena_common import retry_async
+from .zena_logging import get_logger, timed
+
+logger = get_logger()
 
 
+@timed("http.sent_message_to_history")
 @retry_async()
 async def sent_message_to_history(
     user_id: int,

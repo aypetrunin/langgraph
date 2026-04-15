@@ -7,26 +7,28 @@ from typing import Any
 import aiohttp
 import httpx
 
-from .zena_common import logger, retry_async
+from .zena_common import retry_async
+from .zena_logging import get_logger, timed
+
+logger = get_logger()
 
 TIMEOUT_SECONDS = 120.0
 
 
+@timed("http.fetch_personal_info")
 @retry_async()
 async def fetch_personal_info(user_id: int) -> dict[str, Any]:
     """Получение персональной информации через API."""
-    logger.info("===zena_requests.fetch_personal_info===")
-
     url = f"https://httpservice.ai2b.pro/v1/vk/personal-data/{user_id}"
 
-    logger.info("Отправка запроса: %s", url)
+    logger.debug("http.request", url=url)
 
     timeout = aiohttp.ClientTimeout(total=120)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url) as resp:
             if resp.status == 200:
                 return await resp.json()
-            logger.warning("Ошибка запроса: %s", resp.status)
+            logger.warning("http.error", status=resp.status)
             raise RuntimeError(f"Ошибка запроса: {resp.status}")
 
 
@@ -72,14 +74,13 @@ def analyze_response(response: dict) -> list:
 
 
 
+@timed("http.fetch_personal_records")
 @retry_async()
 async def fetch_personal_records(
     user_companychat: int,
     channel_id: str,
 ) -> dict[str, Any]:
     """Получение списка услуг на которые записан клиент через API."""
-    logger.info("===zena_requests.fetch_personal_records===")
-
     url = "https://httpservice.ai2b.pro/appointments/client/records"
 
     payload = {
@@ -87,28 +88,27 @@ async def fetch_personal_records(
         "channel_id": channel_id
     }
 
-    logger.info("Отправка запроса: %s", url)
+    logger.debug("http.request", url=url)
 
     timeout = aiohttp.ClientTimeout(total=120)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, json=payload) as resp:
              if resp.status == 200:
                 responce = await resp.json()
-                logger.info("responce: %s", responce)
+                logger.debug("http.response", response=responce)
                 responce_format = analyze_response(responce)
-                logger.info("responce_format: %s", responce_format)
+                logger.debug("http.response_formatted", data=responce_format)
                 return responce_format
 
 
 
+@timed("http.fetch_crm_go_client_info")
 @retry_async()
 async def fetch_crm_go_client_info(
     phone: str,
     channel_id: str = '20'
 ) -> dict[str, Any]:
     """Получение персональной информации через API."""
-    logger.info("===zena_requests.fetch_crm_go_client_info===")
-
     payload = {
         "channel_id": channel_id,
         "phone": phone
@@ -116,22 +116,22 @@ async def fetch_crm_go_client_info(
 
     url = "https://httpservice.ai2b.pro/appointments/go_crm/client_card_by_phone"
 
-    logger.info("Отправка запроса: %s, payload: %s", url, payload)
+    logger.debug("http.request", url=url, payload=payload)
 
     timeout = aiohttp.ClientTimeout(total=10)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, json=payload) as resp:
              if resp.status == 200:
                 responce = await resp.json()
-                logger.info("responce: %s", responce)
+                logger.debug("http.response", response=responce)
                 return responce
 
         if resp.status == 404:
             return {'success': False, 'message': "Клиента нет базе данных"}
         else:
-            logger.warning("Ошибка запроса: %s", resp.status)
+            logger.warning("http.error", status=resp.status)
             raise RuntimeError(f"Ошибка запроса: {resp.status}")
-    
+
     return {'success': False, 'message': "Клиента нет базе данных"}
 
 
@@ -161,13 +161,13 @@ async def sent_message_to_history(
                 # Если сервер возвращает JSON
                 return await resp.json()
     except aiohttp.ClientResponseError as e:
-        logger.warning("HTTP error: %s %s", e.status, e.message)
+        logger.warning("http.error", status=e.status, message=e.message)
         raise
     except (aiohttp.ConnectionTimeoutError, aiohttp.ServerTimeoutError):
-        logger.warning("Request timed out")
+        logger.warning("http.timeout")
         raise
     except aiohttp.ClientError as e:
-        logger.warning("Client error: %s", e)
+        logger.warning("http.client_error", error=str(e))
         raise
 
 
@@ -175,25 +175,23 @@ def get_stage_onboarding(payload: dict) -> int:
     """Определяет статус опроса по заполненности полей."""
     if not payload.get("parent_name"):  # Заполнен parent_name
         return 0
-    
+
     if not payload.get("child_name"):  # Заполнен child_name
         return 1
-    
+
     if not payload.get("child_date_of_birth"):  # Заполнена дата рождения
         return 2
-    
+
     if not payload["contact_reason"]:  # Заполнена причина
         return 3
-    
+
     return 4  # Fallback
 
 
+@timed("http.fetch_masters_info")
 @retry_async()
 async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]:
     """Получение списка мастеров по офисам для заданного channel_id."""
-    logger.info("===get_masters===")
-    logger.info("Получение списка мастеров channel_id=%s", channel_id)
-
     url = "https://httpservice.ai2b.pro/appointments/yclients/staff/actual"
 
     OFFICE_IDS: dict[int, list[int]] = {
@@ -212,11 +210,7 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
             for office_id in office_list:
                 payload = {"channel_id": office_id}
 
-                logger.info(
-                    "Отправка запроса на получение списка мастеров %s with payload=%s",
-                    url,
-                    payload,
-                )
+                logger.debug("http.request", url=url, payload=payload)
 
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
@@ -227,7 +221,7 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
                         {
                             "master_id": s["id"],
                             "master_name": s["name"],
-                            "position":s.get("position") if isinstance(s.get("position"), str)  else s.get("position", {}).get('title') 
+                            "position":s.get("position") if isinstance(s.get("position"), str)  else s.get("position", {}).get('title')
                         }
                         for s in resp_json.get("staff", [])
                     ],
@@ -238,21 +232,23 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
             return masters_list
 
     except httpx.TimeoutException as e:
-        logger.error("Таймаут при чтении мастеров channel_id=%s: %s", channel_id, e)
+        logger.error("http.timeout", channel_id=channel_id, error=str(e))
         raise  # повторная попытка через retry_async/tenacity
 
     except httpx.HTTPStatusError as e:
         logger.error(
-            "Ошибка HTTP %d при чтении мастеров channel_id=%s: %s",
-            e.response.status_code,
-            channel_id,
-            e,
+            "http.status_error",
+            status=e.response.status_code,
+            channel_id=channel_id,
+            error=str(e),
         )
         return [{"success": False, "error": f"HTTP ошибка: {e.response.status_code}"}]
 
     except Exception as e:
         logger.exception(
-            "Неожиданная ошибка при чтении мастеров channel_id=%s: %s", channel_id, e
+            "http.unexpected_error",
+            channel_id=channel_id,
+            error=str(e),
         )
         return [{"success": False, "error": "Неизвестная ошибка при чтении мастеров"}]
 
