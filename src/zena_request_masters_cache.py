@@ -38,7 +38,9 @@ from typing import Any
 import httpx
 import redis.asyncio as redis
 
-from .zena_common import logger
+from .zena_logging import get_logger, timed
+
+logger = get_logger()
 
 # =========================
 # Настройки
@@ -141,16 +143,16 @@ async def get_redis_safe() -> redis.Redis | None:
         return _redis
 
     redis_url = resolve_redis_url()
-    logger.info("Using Redis URL: %s", redis_url)
+    logger.debug("cache.redis_url", url=redis_url)
 
     try:
         client = redis.from_url(redis_url, encoding="utf-8", decode_responses=True)
         await client.ping()
         _redis = client
-        logger.info("Redis connected")
+        logger.info("cache.redis_connected")
         return _redis
     except Exception as e:
-        logger.warning("Redis unavailable (%s) -> using in-memory cache", e)
+        logger.warning("cache.redis_unavailable", error=str(e))
         return None
 
 
@@ -238,6 +240,7 @@ def _extract_position(staff_item: dict[str, Any]) -> str | None:
 # =========================
 # Public API
 # =========================
+@timed("cache.fetch_masters_info")
 async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]:
     """Возвращает список мастеров по офисам для channel_id.
 
@@ -248,9 +251,6 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
         - если протухли -> сразу возвращаем старые и запускаем фон-обновление.
           ВАЖНО: чтобы не плодить тысячи тасок под нагрузкой, лок берём ДО create_task.
     """
-    logger.info("===get_masters===")
-    logger.info("Получение списка мастеров channel_id=%s", channel_id)
-
     r = await get_redis_safe()
 
     # -------- Redis path --------
@@ -268,11 +268,11 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
                 is_fresh = age < REFRESH_INTERVAL_SECONDS
 
                 if is_fresh:
-                    logger.info("CACHE HIT (fresh) channel_id=%s age=%ss", channel_id, int(age))
+                    logger.info("cache.hit", channel_id=channel_id, fresh=True, age_sec=int(age))
                     return _safe_loads_list(cached_data)
 
                 # stale: вернуть сразу, а обновление — одним воркером
-                logger.info("CACHE HIT (stale) channel_id=%s age=%ss -> background refresh", channel_id, int(age))
+                logger.info("cache.hit", channel_id=channel_id, fresh=False, age_sec=int(age))
 
                 # --- ВАЖНО: сначала пробуем взять лок, и только если взяли — создаём таску
                 lock_key = _lock_key(channel_id)
@@ -283,13 +283,13 @@ async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]
                 return _safe_loads_list(cached_data)
 
             # MISS -> sync fetch
-            logger.info("CACHE MISS channel_id=%s -> fetch origin", channel_id)
+            logger.info("cache.miss", channel_id=channel_id)
             masters = await _fetch_origin(channel_id)
             await _write_cache_redis(r, channel_id, masters)
             return masters
 
         except Exception as e:
-            logger.warning("Redis error during cache op (%s) -> fallback to memory", e)
+            logger.warning("cache.redis_error", error=str(e))
 
     # -------- Memory fallback --------
     return await _fetch_masters_memory_fallback(channel_id)
@@ -308,9 +308,9 @@ async def _refresh_in_background_redis_with_token(r: redis.Redis, channel_id: in
     try:
         masters = await _fetch_origin(channel_id)
         await _write_cache_redis(r, channel_id, masters)
-        logger.info("BACKGROUND REFRESH OK channel_id=%s", channel_id)
+        logger.info("cache.refresh_ok", channel_id=channel_id)
     except Exception as e:
-        logger.warning("BACKGROUND REFRESH FAILED channel_id=%s err=%s", channel_id, e)
+        logger.warning("cache.refresh_failed", channel_id=channel_id, error=str(e))
     finally:
         await _release_lock(r, lock_key, token)
 
@@ -333,7 +333,7 @@ async def _write_cache_redis(r: redis.Redis, channel_id: int | None, masters: li
     pipe.setex(meta_key, REDIS_VALUE_TTL_SECONDS, meta)
     await pipe.execute()
 
-    logger.info("CACHE SET key=%s refresh_interval=%ss", data_key, REFRESH_INTERVAL_SECONDS)
+    logger.debug("cache.set", key=data_key, refresh_interval=REFRESH_INTERVAL_SECONDS)
 
 
 # =========================
@@ -358,10 +358,10 @@ async def _fetch_masters_memory_fallback(channel_id: int | None) -> list[dict[st
         is_fresh = age < REFRESH_INTERVAL_SECONDS
 
         if is_fresh:
-            logger.info("MEM CACHE HIT (fresh) channel_id=%s age=%ss", channel_id, int(age))
+            logger.info("cache.hit", channel_id=channel_id, fresh=True, age_sec=int(age))
             return _safe_loads_list(cached_data)
 
-        logger.info("MEM CACHE HIT (stale) channel_id=%s age=%ss -> background refresh", channel_id, int(age))
+        logger.info("cache.hit", channel_id=channel_id, fresh=False, age_sec=int(age))
 
         # --- ВАЖНО: сначала пробуем взять лок, и только если взяли — создаём таску
         if await _try_acquire_mem_lock():
@@ -370,7 +370,7 @@ async def _fetch_masters_memory_fallback(channel_id: int | None) -> list[dict[st
         return _safe_loads_list(cached_data)
 
     # MISS -> sync fetch
-    logger.info("MEM CACHE MISS channel_id=%s -> fetch origin", channel_id)
+    logger.info("cache.miss", channel_id=channel_id)
     masters = await _fetch_origin(channel_id)
     _write_cache_mem(channel_id, masters)
     return masters
@@ -384,9 +384,9 @@ async def _refresh_in_background_mem_locked(channel_id: int | None) -> None:
     try:
         masters = await _fetch_origin(channel_id)
         _write_cache_mem(channel_id, masters)
-        logger.info("MEM BACKGROUND REFRESH OK channel_id=%s", channel_id)
+        logger.info("cache.refresh_ok", channel_id=channel_id)
     except Exception as e:
-        logger.warning("MEM BACKGROUND REFRESH FAILED channel_id=%s err=%s", channel_id, e)
+        logger.warning("cache.refresh_failed", channel_id=channel_id, error=str(e))
     finally:
         # важно отпустить лок
         try:
@@ -405,7 +405,7 @@ def _write_cache_mem(channel_id: int | None, masters: list[dict[str, Any]]) -> N
     _mem_set(data_key, payload, MEM_VALUE_TTL_SECONDS)
     _mem_set(meta_key, meta, MEM_VALUE_TTL_SECONDS)
 
-    logger.info("MEM CACHE SET key=%s refresh_interval=%ss", data_key, REFRESH_INTERVAL_SECONDS)
+    logger.debug("cache.set", key=data_key, refresh_interval=REFRESH_INTERVAL_SECONDS)
 
 
 # =========================
@@ -429,7 +429,7 @@ async def _fetch_origin(channel_id: int | None) -> list[dict[str, Any]]:
 
         for office_id in office_list:
             payload = {"channel_id": office_id}
-            logger.info("Origin request %s payload=%s", url, payload)
+            logger.debug("cache.origin_request", url=url, payload=payload)
 
             response = await client.post(url, json=payload)
             response.raise_for_status()
@@ -450,194 +450,3 @@ async def _fetch_origin(channel_id: int | None) -> list[dict[str, Any]]:
             )
 
         return masters_list
-
-
-
-
-# import os
-# import json
-# import time
-# import uuid
-# import asyncio
-# from typing import Any
-
-# import redis.asyncio as redis
-# import httpx
-
-# from .zena_common import logger, retry_async
-
-# TIMEOUT_SECONDS = 120.0
-# CACHE_TTL_SECONDS = 60
-# LOCK_TTL_SECONDS = 15           # сколько держим лок на время запроса
-# LOCK_WAIT_SECONDS = 3           # сколько ждем лок, чтобы дождаться прогрева кеша
-# LOCK_RETRY_DELAY = 0.15
-
-# REDIS_URI = os.getenv("REDIS_URI", "redis://localhost:6379")
-
-# _redis: redis.Redis | None = None
-
-# def normalize_redis_url(url: str | None) -> str:
-#     if not url:
-#         return "redis://localhost:6379"
-#     if "://" not in url:
-#         return f"redis://{url}"
-#     return url
-
-
-# def get_redis() -> redis.Redis:
-#     global _redis
-#     if _redis is None:
-#         raw = os.getenv("REDIS_URI")
-#         redis_url = normalize_redis_url(raw)
-#         logger.info("Using Redis URL: %s", redis_url)
-
-#         _redis = redis.from_url(
-#             redis_url,
-#             encoding="utf-8",
-#             decode_responses=True,
-#         )
-#     return _redis
-
-# def _cache_key(channel_id: int | None) -> str:
-#     # нормализуем None/0 как 0
-#     cid = int(channel_id or 0)
-#     return f"masters:{cid}"
-
-# def _lock_key(channel_id: int | None) -> str:
-#     cid = int(channel_id or 0)
-#     return f"lock:masters:{cid}"
-
-
-# # --- distributed lock helpers (SET NX EX + безопасный release) ---
-
-# _RELEASE_LUA = """
-# if redis.call("get", KEYS[1]) == ARGV[1] then
-#   return redis.call("del", KEYS[1])
-# else
-#   return 0
-# end
-# """
-
-# async def acquire_lock(r: redis.Redis, key: str, ttl: int, wait_seconds: float) -> str | None:
-#     token = str(uuid.uuid4())
-#     deadline = time.time() + wait_seconds
-#     while True:
-#         ok = await r.set(key, token, nx=True, ex=ttl)
-#         if ok:
-#             return token
-#         if time.time() >= deadline:
-#             return None
-#         await asyncio.sleep(LOCK_RETRY_DELAY)
-
-# async def release_lock(r: redis.Redis, key: str, token: str) -> None:
-#     try:
-#         await r.eval(_RELEASE_LUA, 1, key, token)
-#     except Exception:
-#         # не валим основной флоу из-за лока
-#         pass
-
-
-# async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]:
-#     logger.info("===get_masters===")
-#     logger.info("Получение списка мастеров channel_id=%s", channel_id)
-
-#     r = get_redis()
-#     key = _cache_key(channel_id)
-
-#     # 1) CACHE HIT
-#     cached = await r.get(key)
-#     if cached:
-#         logger.info("CACHE HIT channel_id=%s", channel_id)
-#         return json.loads(cached)
-
-#     # 2) Попытка взять лок, чтобы только один процесс прогревал кеш
-#     lock_key = _lock_key(channel_id)
-#     token = await acquire_lock(r, lock_key, ttl=LOCK_TTL_SECONDS, wait_seconds=LOCK_WAIT_SECONDS)
-
-#     if token is None:
-#         # не смогли взять лок — возможно другой воркер уже ходит во внешний сервис
-#         # подождем чуть-чуть и попробуем взять кеш ещё раз
-#         cached = await r.get(key)
-#         if cached:
-#             logger.info("CACHE HIT(after wait) channel_id=%s", channel_id)
-#             return json.loads(cached)
-#         # если всё еще нет — идем сами без лока (чтобы не зависнуть)
-#         logger.info("LOCK TIMEOUT, going to origin channel_id=%s", channel_id)
-#         return await _fetch_and_cache(channel_id, r, key, lock_key=None, token=None)
-
-#     try:
-#         # 3) Double-check под локом (вдруг кеш успели положить, пока мы брали лок)
-#         cached = await r.get(key)
-#         if cached:
-#             logger.info("CACHE HIT(after lock) channel_id=%s", channel_id)
-#             return json.loads(cached)
-
-#         # 4) Идем во внешний сервис и кешируем
-#         return await _fetch_and_cache(channel_id, r, key, lock_key=lock_key, token=token)
-
-#     finally:
-#         await release_lock(r, lock_key, token)
-
-
-# async def _fetch_and_cache(
-#     channel_id: int | None,
-#     r: redis.Redis,
-#     cache_key: str,
-#     lock_key: str | None,
-#     token: str | None,
-# ) -> list[dict[str, Any]]:
-#     url = "https://httpservice.ai2b.pro/appointments/yclients/staff/actual"
-
-#     OFFICE_IDS: dict[int, list[int]] = {1: [1, 19]}
-
-#     if isinstance(channel_id, int) and channel_id in OFFICE_IDS:
-#         office_list = OFFICE_IDS[channel_id]
-#     else:
-#         office_list = [channel_id] if isinstance(channel_id, int) and channel_id > 0 else []
-
-#     try:
-#         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-#             masters_list: list[dict[str, Any]] = []
-
-#             for office_id in office_list:
-#                 payload = {"channel_id": office_id}
-#                 logger.info("Origin request %s payload=%s", url, payload)
-
-#                 response = await client.post(url, json=payload)
-#                 response.raise_for_status()
-#                 resp_json = response.json()
-
-#                 masters_list.append({
-#                     "office_id": office_id,
-#                     "masters": [
-#                         {
-#                             "master_id": s["id"],
-#                             "master_name": s["name"],
-#                             "position": (
-#                                 s.get("position")
-#                                 if isinstance(s.get("position"), str)
-#                                 else s.get("position", {}).get("title")
-#                             ),
-#                         }
-#                         for s in resp_json.get("staff", [])
-#                     ],
-#                 })
-
-#             # кешируем только успешный ответ
-#             await r.setex(cache_key, CACHE_TTL_SECONDS, json.dumps(masters_list, ensure_ascii=False))
-#             logger.info("CACHE SET key=%s ttl=%ss", cache_key, CACHE_TTL_SECONDS)
-
-#             return masters_list
-
-#     except httpx.TimeoutException as e:
-#         logger.error("Таймаут при чтении мастеров channel_id=%s: %s", channel_id, e)
-#         raise
-
-#     except httpx.HTTPStatusError as e:
-#         logger.error("HTTP %d при чтении мастеров channel_id=%s: %s",
-#                      e.response.status_code, channel_id, e)
-#         return [{"success": False, "error": f"HTTP ошибка: {e.response.status_code}"}]
-
-#     except Exception as e:
-#         logger.exception("Неожиданная ошибка при чтении мастеров channel_id=%s: %s", channel_id, e)
-#         return [{"success": False, "error": "Неизвестная ошибка при чтении мастеров"}]
