@@ -24,9 +24,12 @@ import asyncpg
 from dotenv import load_dotenv
 from typing_extensions import Any, Dict, Iterable, List
 
-from .zena_common import logger, retry_async
+from .zena_common import retry_async
+from .zena_logging import get_logger, timed
 from .zena_request_masters_cache import fetch_masters_info
 from .zena_requests import fetch_personal_info
+
+logger = get_logger()
 
 # Загрузка .env для локальной разработки (в Docker переменные приходят из compose)
 if not os.getenv("IS_DOCKER"):
@@ -161,6 +164,7 @@ async def data_user_info(user_companychat: int) -> dict[str, Any]:
         return {"data": flat_data}
 
 
+@timed("postgres.fetch_dialog")
 @retry_async()
 async def fetch_dialog(conn: asyncpg.Connection, user_companychat: int) -> Any:
     """Получение диалога."""
@@ -212,6 +216,7 @@ def pg_rows_to_products(rows: Iterable[asyncpg.Record]) -> list[dict[str, Any]]:
     return result
 
 
+@timed("postgres.fetch_key_words")
 @retry_async()
 async def fetch_key_words(channel_id: int, key_word: str) -> Any:
     """Получение ключевых фраз."""
@@ -244,6 +249,7 @@ async def fetch_key_words(channel_id: int, key_word: str) -> Any:
         return pg_rows_to_products(rows)
 
 
+@timed("postgres.fetch_is_first_dialog")
 @retry_async()
 async def fetch_is_first_dialog(conn: asyncpg.Connection, user_companychat: int) -> bool:
     """Определение, что диалог с ботом ведётся впервые."""
@@ -256,11 +262,11 @@ async def fetch_is_first_dialog(conn: asyncpg.Connection, user_companychat: int)
         """,
         user_companychat,
     )
-    logger.info("=====fetch_is_first_dialog=====")
-    logger.info("count: %s", count)
+    logger.debug("postgres.first_dialog_check", count=count)
     return count == 1
 
 
+@timed("postgres.fetch_channel_info")
 @retry_async()
 async def fetch_channel_info(
     conn: asyncpg.Connection, user_companychat: int
@@ -287,6 +293,7 @@ async def fetch_channel_info(
     return dict(row) if row else {}
 
 
+@timed("postgres.fetch_prompts")
 @retry_async()
 async def fetch_prompts(
     conn: asyncpg.Connection, user_companychat: int
@@ -338,6 +345,7 @@ async def fetch_prompts(
     return result
 
 
+@timed("postgres.fetch_category")
 @retry_async()
 async def fetch_category(conn: asyncpg.Connection, channel_id: int) -> str:
     """Получение категорий/групп товаров/услуг."""
@@ -358,6 +366,7 @@ async def fetch_category(conn: asyncpg.Connection, channel_id: int) -> str:
     return string_category
 
 
+@timed("postgres.fetch_services")
 @retry_async()
 async def fetch_services(conn: asyncpg.Connection, channel_id: int) -> str:
     """Получение товаров/услуг. Это нужно для компаний с малым количеством услуг.
@@ -385,6 +394,7 @@ async def fetch_services(conn: asyncpg.Connection, channel_id: int) -> str:
     return string_services
 
 
+@timed("postgres.fetch_probny")
 @retry_async()
 async def fetch_probny(conn: asyncpg.Connection, channel_id: int) -> str:
     """Получение пробных услуг."""
@@ -423,6 +433,7 @@ async def fetch_probny(conn: asyncpg.Connection, channel_id: int) -> str:
     return ", ".join(parts)
 
 
+@timed("postgres.delete_history_messages")
 @retry_async()
 async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
     """Удаление истории диалога."""
@@ -431,29 +442,26 @@ async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
         channel_info = await fetch_channel_info(conn, user_companychat)
         session_id = channel_info.get("session_id")
         if not session_id:
-            logger.error(
-                "Session ID not found for user_companychat=%s",
-                user_companychat,
-            )
+            logger.error("postgres.session_not_found", user_cc=user_companychat)
             return {"success": False, "error": "session_id not found"}
 
         async with conn.transaction():
-            del_bot_history = await conn.execute(
+            await conn.execute(
                 "DELETE FROM public.bot_history bh WHERE bh.user_companychat = $1;",
                 user_companychat,
             )
-        logger.info("Данные из истории удалены: %s", del_bot_history)
+        logger.info("dialog.history_cleared")
         return {"success": True}
 
 
+@timed("postgres.delete_personal_data")
 @retry_async()
 async def delete_personal_data(user_companychat: int) -> Dict[str, Any]:
     """Удаление персональных данных."""
-    logger.info("===delete_personal_data===")
     pool = await get_pool()
     async with pool.acquire() as conn:
         channel_info = await fetch_channel_info(conn, user_companychat)
-        logger.info("channel_info: %s", channel_info)
+        logger.debug("postgres.channel_info", channel_info=channel_info)
 
         async with conn.transaction():
             user_id = await conn.fetchval(
@@ -465,24 +473,22 @@ async def delete_personal_data(user_companychat: int) -> Dict[str, Any]:
                 ''',
                 user_companychat,
             )
-            logger.info("user_id: %s", user_id)
-            del_consent = await conn.execute(
+            logger.debug("postgres.user_id", user_id=user_id)
+            await conn.execute(
                 "DELETE FROM personal_data_consent WHERE user_id = $1", user_id
             )
-            del_data = await conn.execute(
+            await conn.execute(
                 "DELETE FROM personal_data WHERE user_id = $1", user_id
             )
-            del_user = await conn.execute(
+            await conn.execute(
                 'DELETE FROM "user" WHERE id = $1', user_id
             )
 
-        logger.info(
-            "Персональные данные удалены: %s, %s, %s",
-            del_consent, del_data, del_user,
-        )
+        logger.info("personal_data.deleted")
         return {"success": True}
 
 
+@timed("postgres.save_query")
 @retry_async()
 async def save_query_from_human_in_postgres(
     user_companychat: int, query: str
