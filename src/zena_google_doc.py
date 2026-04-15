@@ -28,7 +28,10 @@ import httpx
 from google.auth import jwt as google_jwt
 from google.oauth2 import service_account
 
-from .zena_common import logger, retry_async  # type: ignore
+from .zena_common import retry_async  # type: ignore
+from .zena_logging import get_logger, timed  # noqa: F401
+
+logger = get_logger()
 
 # ────────────────────── Константы ──────────────────────
 
@@ -246,9 +249,9 @@ class GoogleDocTemplateReader:
                     if attempt == _TOKEN_WARMUP_RETRIES - 1:
                         raise
                     logger.info(
-                        "Token warmup attempt %d failed: %s, retrying...",
-                        attempt + 1,
-                        e,
+                        "template.token_warmup_retry",
+                        attempt=attempt + 1,
+                        error=str(e),
                     )
                     await asyncio.sleep(1.0)
 
@@ -301,10 +304,10 @@ class GoogleDocTemplateReader:
             },
         )
         if resp.status_code != 200:
-            logger.error(
-                "Token refresh failed: status=%s body=%s",
-                resp.status_code,
-                resp.text,
+            logger.warning(
+                "template.token_refresh_failed",
+                status=resp.status_code,
+                body=resp.text,
             )
         resp.raise_for_status()
 
@@ -394,7 +397,7 @@ class GoogleDocTemplateReader:
             httpx.ConnectError,
             httpx.TimeoutException,
         ):
-            logger.warning("Connection error, resetting clients for retry")
+            logger.warning("template.connection_error_reset")
             self._reset_clients()
             raise
 
@@ -413,7 +416,7 @@ class GoogleDocTemplateReader:
 
             # 1) Нет кеша — первая загрузка
             if not entry:
-                logger.info("Google Doc %s: первая загрузка (нет кеша)", doc_id)
+                logger.info("template.doc_first_load", doc_id=doc_id)
                 text = await self._export_text(doc_id)
                 mtime = await self._get_modified_time(doc_id)
                 self._CACHE[doc_id] = _CacheEntry(
@@ -433,8 +436,10 @@ class GoogleDocTemplateReader:
                     # Документ изменился — перекачиваем
                     if mtime and entry.modified_time and mtime != entry.modified_time:
                         logger.info(
-                            "Google Doc %s: документ изменился, перезагрузка (old=%s, new=%s)",
-                            doc_id, entry.modified_time, mtime,
+                            "template.doc_changed",
+                            doc_id=doc_id,
+                            old_mtime=entry.modified_time,
+                            new_mtime=mtime,
                         )
                         text = await self._export_text(doc_id)
                         self._CACHE[doc_id] = _CacheEntry(
@@ -449,12 +454,14 @@ class GoogleDocTemplateReader:
 
                 except Exception as e:
                     # Ошибка метаданных не должна блокировать ответ — отдаём кеш
-                    logger.warning("Metadata check failed for doc %s: %s", doc_id, e)
+                    logger.warning("template.metadata_check_failed", doc_id=doc_id, error=str(e))
 
             # 3) TTL текста истёк — безусловное обновление
             if text_age >= self.cache_ttl_sec:
                 logger.info(
-                    "Google Doc %s: TTL кеша истёк (%.0fс), перезагрузка", doc_id, text_age
+                    "template.cache_expired",
+                    doc_id=doc_id,
+                    age_sec=int(text_age),
                 )
                 text = await self._export_text(doc_id)
                 mtime = await self._get_modified_time(doc_id)
@@ -464,7 +471,7 @@ class GoogleDocTemplateReader:
                 return text
 
             # 4) Кеш актуален
-            logger.info("Google Doc %s: отдаём из кеша (возраст %.0fс)", doc_id, text_age)
+            logger.debug("template.cache_hit", doc_id=doc_id, age_sec=int(text_age))
             return entry.text
 
     # ──────────── Фабрика ────────────

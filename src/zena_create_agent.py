@@ -24,7 +24,8 @@ from langchain_core.tools.base import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph.state import CompiledStateGraph
 
-from .zena_common import logger, model_4o_mini, model_4o_mini_reserv
+from .zena_common import model_4o_mini, model_4o_mini_reserv
+from .zena_logging import get_logger
 from .zena_middleware_after_agent import ResetData
 from .zena_middleware_after_model import (
     GetCountToken,
@@ -42,6 +43,8 @@ from .zena_middleware_wrap_model import (
 )
 from .zena_middleware_wrap_tool import ToolMonitoringMiddleware
 from .zena_state import Context, State
+
+logger = get_logger()
 
 
 async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
@@ -64,7 +67,7 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
     tools = await _get_tools(mcp_port)
     
     tools_name = [tool.name for tool in tools]
-    logger.info("create_agent_mcp tools (%s): %s", mcp_port, tools_name)
+    logger.info("agent.tools_loaded", mcp_port=mcp_port, tools=tools_name)
     
     # Middleware-стек выполняется в порядке добавления:
     # 1. before_agent: VerifyInputMessage → GetDatabaseMiddleware → GetKeyWordMiddleware

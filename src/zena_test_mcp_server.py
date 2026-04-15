@@ -7,21 +7,22 @@
 """
 
 import asyncio
-import logging
 from typing import List
 
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from src.zena_logging import get_logger, setup_logging
+
+setup_logging()
+logger = get_logger()
 
 async def _get_tools(mcp_port: int) -> List[BaseTool]:
     """Получение инструментов из MCP-сервера по выбранному порту."""
     # Пробуем оба адреса
     for host in ["127.0.0.1", "172.17.0.1", "localhost"]:
         url = f"http://{host}:{mcp_port}/sse"
-        logger.info("Пробуем подключиться к %s", url)
+        logger.info("mcp.connecting", url=url)
         try:
             client = MultiServerMCPClient({
                 "company": {
@@ -30,10 +31,10 @@ async def _get_tools(mcp_port: int) -> List[BaseTool]:
                 }
             })
             tools = await client.get_tools()
-            logger.info("✅ УСПЕХ на %s:%s", host, mcp_port)
+            logger.info("mcp.connected", host=host, port=mcp_port)
             return tools
         except Exception as e:
-            logger.warning("❌ %s:%s недоступен: %s", host, mcp_port, e)
+            logger.warning("mcp.unavailable", host=host, port=mcp_port, error=str(e))
             continue
     raise Exception(f"Все адреса для порта {mcp_port} недоступны")
 
@@ -44,9 +45,9 @@ async def main() -> None:
         try:
             tools = await _get_tools(port)
             tools_name = [tool.name for tool in tools]
-            logger.info("create_agent_mcp tools (%s): %s", port, tools_name)
+            logger.info("mcp.tools_loaded", port=port, tools=tools_name)
         except Exception as e:
-            logger.error("❌ Порт %s полностью недоступен: %s", port, e)
+            logger.error("mcp.port_unavailable", port=port, error=str(e))
 
 if __name__ == "__main__":
     asyncio.run(main())
