@@ -37,6 +37,8 @@ services:
 
   langgraph-api:
     image: ${LANGGRAPH_IMAGE}
+    labels:
+      logging: "loki"
     env_file:
       - ../deploy/prod.env
     ports:
@@ -56,3 +58,7 @@ services:
       start_period: 10s
     networks:
       - zena-network
+
+networks:
+  zena-network:
+    external: true
