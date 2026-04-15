@@ -1,31 +1,42 @@
-"""Модуль описывающий состояние графа."""
+"""Схема состояния графа агента.
+
+Определяет TypedDict-схемы для всех слоёв состояния LangGraph:
+- Context      — переменные окружения (user_id, access_token и др.)
+- InputState   — входные данные (messages + data)
+- OutputState  — выходные данные (messages + data)
+- PrivateState — внутренние переменные (tools_name, tools_args, tokens)
+- State        — объединённое состояние графа
+
+Также содержит RESET-сентинел и кастомный reducer add_tools_or_reset,
+который позволяет накапливать данные инструментов и сбрасывать их
+между итерациями агента.
+"""
 
 from __future__ import annotations
 
-from operator import add
+from typing import Any
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
+from typing_extensions import Annotated, TypedDict
 
-from typing import Any
-from typing_extensions import TypedDict, NotRequired, Required, Generic, TypeVar, Annotated
-
-from langchain.agents.middleware.types import AgentState as BaseAgentState
-
-ResponseT = TypeVar("ResponseT")
-
+# Сентинел для сброса аккумулируемых полей (tools_name, tools_args и т.д.)
 RESET = object()
 
+
 def add_tools_or_reset(current: list[Any] | None, update: Any) -> list[Any]:
-    # первый апдейт
+    """Reducer для аккумуляции данных инструментов с возможностью сброса.
+
+    Используется как аннотация Annotated[list, add_tools_or_reset].
+    При получении RESET — возвращает пустой список.
+    При получении значения — добавляет к текущему списку.
+    """
     if current is None:
         current = []
 
-    # пришёл сигнал на сброс
     if update is RESET:
         return []
 
-    # если апдейт — один элемент, нормализуем к списку
     if not isinstance(update, list):
         update = [update]
 

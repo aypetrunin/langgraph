@@ -1,10 +1,17 @@
+"""Агент реанимации диалога.
 
-from langchain.agents.middleware.types import AgentState
+Генерирует один естественный follow-up вопрос на основе контекста
+прерванного диалога. Используется для возвращения клиента в разговор.
+
+Работает на gpt-4o-mini, без инструментов — только текстовая генерация.
+"""
+
 from langchain.agents import create_agent
+from langchain.agents.middleware.types import AgentState
 
 from .zena_common import model_4o_mini
 
-agent_redialog = create_agent( 
+agent_redialog = create_agent(
     model=model_4o_mini,
     state_schema=AgentState,
     system_prompt="""

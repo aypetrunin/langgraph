@@ -1,17 +1,25 @@
-from typing import Any, Mapping, Optional, cast
+"""Middleware, выполняемые после вызова LLM-модели.
 
+GetCRMGOOnboardStage — управляет этапом онбординга для агента Алена (порт 5020):
+    инкрементирует onboarding_stage, если клиент ещё не прошёл онбординг.
+GetToolArgs — извлекает аргументы вызовов инструментов из AIMessage
+    и сохраняет их в state['tools_args'] для логирования.
+GetCountToken — подсчитывает токены (input/output/total) из usage_metadata
+    и накапливает их в state['tokens'].
+"""
 
-from langgraph.runtime import Runtime
+from typing import Any, Mapping, cast
+
 from langchain.agents.middleware import AgentMiddleware
-from langchain_core.messages import AnyMessage, AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage
+from langgraph.runtime import Runtime
 
+from .zena_common import logger
+from .zena_state import Context, State
 
-
-from .zena_common import logger, _func_name
-from .zena_state import State, Context
 
 class GetCRMGOOnboardStage(AgentMiddleware):
-    """Сохраняет аргументы, передаваемые в инструмент."""
+    """Инкрементирует этап онбординга для агента Алена (порт 5020)."""
 
     async def aafter_model(
         self,
@@ -26,7 +34,7 @@ class GetCRMGOOnboardStage(AgentMiddleware):
         if data.get("mcp_port") != 5020:
             return None
 
-        messages: Optional[list[AnyMessage]] = state.get("messages")
+        messages: list[AnyMessage] | None = state.get("messages")
         # logger.info(f'messages: {messages}')
         if not messages:
             return None
@@ -36,8 +44,8 @@ class GetCRMGOOnboardStage(AgentMiddleware):
         if not isinstance(last_message, AIMessage):
             return None
 
-        tool_calls: Optional[list[Any]] = getattr(last_message, "tool_calls", None)
-        logger.info(f'tool_calls: {tool_calls}')
+        tool_calls: list[Any] | None = getattr(last_message, "tool_calls", None)
+        logger.info("tool_calls: %s", tool_calls)
         if tool_calls:
             return None
 
@@ -67,7 +75,7 @@ class GetToolArgs(AgentMiddleware):
     ) -> dict[str, Any] | None:
         logger.info("=== after_model: GetToolArgs ===")
 
-        messages: Optional[list[AnyMessage]] = state.get("messages")
+        messages: list[AnyMessage] | None = state.get("messages")
         if not messages:
             return None
 
@@ -75,7 +83,7 @@ class GetToolArgs(AgentMiddleware):
         if not isinstance(last_message, AIMessage):
             return None
 
-        tool_calls: Optional[list[Any]] = getattr(last_message, "tool_calls", None)
+        tool_calls: list[Any] | None = getattr(last_message, "tool_calls", None)
         if not tool_calls:
             return None
 
@@ -98,18 +106,18 @@ class GetCountToken(AgentMiddleware):
         self,
         state: State,
         runtime: Runtime[Context],
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         logger.info("===after_model===CountToken===")
 
-        messages: Optional[list[BaseMessage]] = cast(
-            Optional[list[BaseMessage]], state.get("messages")
+        messages: list[BaseMessage] | None = cast(
+            list[BaseMessage] | None, state.get("messages")
         )
         if not messages:
             return None
 
         msg: BaseMessage = messages[-1]
 
-        usage: Optional[dict[str, Any]] = self._extract_usage(msg)
+        usage: dict[str, Any] | None = self._extract_usage(msg)
         if not usage:
             return None
 
@@ -122,7 +130,7 @@ class GetCountToken(AgentMiddleware):
         }
 
 
-    def _extract_usage(self, msg: BaseMessage) -> Optional[dict[str, Any]]:
+    def _extract_usage(self, msg: BaseMessage) -> dict[str, Any] | None:
         # Проверяем usage_metadata
         usage_metadata = getattr(msg, "usage_metadata", None)
         if isinstance(usage_metadata, dict):

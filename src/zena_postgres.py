@@ -1,4 +1,19 @@
-"""Модуль реализует функции обращения к Postgres."""
+"""Работа с PostgreSQL: сбор данных, история диалогов, персональные данные.
+
+Все функции используют общий пул соединений (asyncpg.Pool), который
+создаётся лениво при первом обращении через get_pool().
+
+Основные функции:
+- data_collection_postgres() — сбор всех данных для контекста агента
+  (информация о канале, промпты, категории, услуги, мастера, пользователь).
+  Использует asyncio.gather() для параллельного выполнения запросов.
+- fetch_key_words() — поиск услуг по ключевым словам из промо-таблицы.
+- delete_history_messages() — очистка истории диалога (команда «стоп»).
+- delete_personal_data() — удаление ПД по запросу пользователя.
+- save_query_from_human_in_postgres() — логирование запроса из LangGraph Studio.
+
+Все функции с внешним подключением обёрнуты в @retry_async() для устойчивости.
+"""
 
 import asyncio
 import os
@@ -13,12 +28,13 @@ from .zena_common import logger, retry_async
 from .zena_request_masters_cache import fetch_masters_info
 from .zena_requests import fetch_personal_info
 
+# Загрузка .env для локальной разработки (в Docker переменные приходят из compose)
 if not os.getenv("IS_DOCKER"):
     ROOT = Path(__file__).resolve().parents[3]
     dotenv_path = ROOT / "deploy" / "dev.env"
     load_dotenv(dotenv_path=dotenv_path)
 
-
+# -------------------- Конфигурация подключения --------------------
 POSTGRES_CONFIG = {
     "user": os.getenv("POSTGRES_USER"),
     "password": os.getenv("POSTGRES_PASSWORD"),
@@ -27,11 +43,16 @@ POSTGRES_CONFIG = {
     "port": int(os.getenv("POSTGRES_PORT", "5432")),
 }
 
+# Синглтон пула соединений — создаётся лениво при первом вызове get_pool()
 _pool: asyncpg.Pool | None = None
 
 
 async def get_pool() -> asyncpg.Pool:
-    """Return the shared connection pool, creating it on first call."""
+    """Возвращает общий пул соединений, создавая его при первом вызове.
+
+    Пул переиспользуется между запросами. При закрытии пула (graceful shutdown)
+    автоматически пересоздаётся при следующем обращении.
+    """
     global _pool
     if _pool is None or _pool._closed:
         _pool = await asyncpg.create_pool(

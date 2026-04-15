@@ -1,14 +1,13 @@
 """Модуль реализует обращение по API."""
 
-import aiohttp
 import asyncio
+from datetime import datetime
+from typing import Any
+
+import aiohttp
 import httpx
 
-from typing import Any
-from datetime import datetime
-
 from .zena_common import logger, retry_async
-
 
 TIMEOUT_SECONDS = 120.0
 
@@ -78,10 +77,9 @@ async def fetch_personal_records(
     channel_id: str,
 ) -> dict[str, Any]:
     """Получение списка услуг на которые записан клиент через API."""
-
     logger.info("===zena_requests.fetch_personal_records===")
 
-    url = f"https://httpservice.ai2b.pro/appointments/client/records"
+    url = "https://httpservice.ai2b.pro/appointments/client/records"
 
     payload = {
         "user_companychat": user_companychat,
@@ -108,7 +106,6 @@ async def fetch_crm_go_client_info(
     channel_id: str = '20'
 ) -> dict[str, Any]:
     """Получение персональной информации через API."""
-
     logger.info("===zena_requests.fetch_crm_go_client_info===")
 
     payload = {
@@ -116,7 +113,7 @@ async def fetch_crm_go_client_info(
         "phone": phone
     }
 
-    url = f"https://httpservice.ai2b.pro/appointments/go_crm/client_card_by_phone"
+    url = "https://httpservice.ai2b.pro/appointments/go_crm/client_card_by_phone"
 
     logger.info("Отправка запроса: %s, payload: %s", url, payload)
 
@@ -175,7 +172,6 @@ async def sent_message_to_history(
 
 def get_stage_onboarding(payload: dict) -> int:
     """Определяет статус опроса по заполненности полей."""
-
     if not payload.get("parent_name"):  # Заполнен parent_name
         return 0
     
@@ -194,7 +190,6 @@ def get_stage_onboarding(payload: dict) -> int:
 @retry_async()
 async def fetch_masters_info(channel_id: int | None = 0) -> list[dict[str, Any]]:
     """Получение списка мастеров по офисам для заданного channel_id."""
-
     logger.info("===get_masters===")
     logger.info("Получение списка мастеров channel_id=%s", channel_id)
 

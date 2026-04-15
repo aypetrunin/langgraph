@@ -23,7 +23,6 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import httpx
 from google.auth import jwt as google_jwt
@@ -135,7 +134,7 @@ class _CacheEntry:
     text: str  # Текст документа (text/plain)
     fetched_at: float  # Время последней загрузки (unix timestamp)
     checked_at: float  # Время последней проверки modifiedTime
-    modified_time: Optional[str]  # modifiedTime из Google Drive API
+    modified_time: str | None  # modifiedTime из Google Drive API
 
 
 # ────────────────────── Основной класс ──────────────────────
@@ -176,7 +175,7 @@ class GoogleDocTemplateReader:
     def __init__(
         self,
         doc_url: str,
-        service_account_file: Optional[str] = None,
+        service_account_file: str | None = None,
         cache_ttl_sec: int = 60,
         meta_check_ttl_sec: int = 10,
     ) -> None:
@@ -315,7 +314,7 @@ class GoogleDocTemplateReader:
 
     # ──────────── Google Drive API ────────────
 
-    async def _get_modified_time(self, doc_id: str) -> Optional[str]:
+    async def _get_modified_time(self, doc_id: str) -> str | None:
         """Получает modifiedTime документа (лёгкий запрос без скачивания текста).
 
         Используется для проверки: изменился ли документ с момента последней загрузки.
@@ -466,7 +465,7 @@ class GoogleDocTemplateReader:
     async def create(
         cls,
         doc_url: str,
-        service_account_file: Optional[str] = None,
+        service_account_file: str | None = None,
         cache_ttl_sec: int = 60,
         meta_check_ttl_sec: int = 10,
     ) -> GoogleDocTemplateReader:

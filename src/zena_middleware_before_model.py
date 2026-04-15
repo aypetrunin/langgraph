@@ -1,3 +1,12 @@
+"""Middleware, выполняемые перед вызовом LLM-модели.
+
+TrimMessages — ограничивает количество сообщений в контексте модели,
+чтобы не превышать лимит контекстного окна. Сохраняет первое сообщение
+(системный промпт) и последние N сообщений.
+
+Настройка через env MAX_MESSAGES_HISTORY (по умолчанию 20).
+"""
+
 import os
 from typing import Any
 
@@ -11,7 +20,7 @@ from .zena_state import Context, State
 
 
 class TrimMessages(AgentMiddleware):
-    """Ограничение количества сообщений для модели."""
+    """Ограничение количества сообщений перед отправкой в LLM."""
 
     async def abefore_model(
             self,

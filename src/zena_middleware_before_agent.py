@@ -1,28 +1,37 @@
-"""Middleware before agent."""
+"""Middleware, выполняемые перед запуском агента.
+
+VerifyInputMessage — проверяет входящее сообщение:
+  - «стоп» → очистка истории диалога
+  - «phone» → удаление персональных данных
+  - сообщение из списка запрещённых тем → возврат клиенту без агента
+GetDatabaseMiddleware — загружает данные из PostgreSQL (канал, промпты,
+  категории, услуги, мастера, пользователь) и внешних API (CRM GO).
+GetKeyWordMiddleware — ищет услуги по ключевым словам из промо-таблицы.
+GetCRMGOMiddleware — загружает данные онбординга из CRM GO (порт 5020).
+"""
 
 from __future__ import annotations
 
 from typing import Any, Union
 
-
-from langgraph.runtime import Runtime
-from langchain_core.messages import AIMessage, BaseMessage
 from langchain.agents.middleware import (
-    AgentState,
     AgentMiddleware,
     hook_config,
 )
-from .zena_state import State, Context
-from .zena_common import logger, _content_to_text
+from langchain_core.messages import AIMessage, BaseMessage
+from langgraph.runtime import Runtime
+
+from .zena_common import _content_to_text, logger
 from .zena_postgres import (
+    data_collection_postgres,
+    data_user_info,
     delete_history_messages,
     delete_personal_data,
-    data_collection_postgres,
-    save_query_from_human_in_postgres,
-    data_user_info,
     fetch_key_words,
+    save_query_from_human_in_postgres,
 )
-from .zena_requests import fetch_personal_info, fetch_crm_go_client_info
+from .zena_requests import fetch_crm_go_client_info
+from .zena_state import Context, State
 
 # Список сообщений из httpservice на запрещенные темы.
 # которые передаем клиенту через бота.
@@ -72,8 +81,6 @@ class VerifyInputMessage(AgentMiddleware):
             if last_message.lower() == PREDEFINED_STOP:
                 await delete_history_messages(user_companychat)
                 data = await data_user_info(user_companychat)
-                # responce_mem = await memory.delete_all(run_id='test')
-                # logger.info(f"responce_mem delete: {responce_mem}")
                 return {
                     "messages": [AIMessage(content="Память очищена")],
                     "user_companychat": user_companychat,
@@ -83,8 +90,6 @@ class VerifyInputMessage(AgentMiddleware):
             if last_message.lower() == PREDEFINED_DEL_PERSONAL_DATA:
                 await delete_personal_data(user_companychat)
                 data = await data_user_info(user_companychat)
-                # responce_mem = await memory.delete_all(run_id='test')
-                # logger.info(f"responce_mem delete: {responce_mem}")
                 return {
                     "messages": [AIMessage(content="Персональные данные удалены")],
                     "user_companychat": user_companychat,
@@ -254,7 +259,6 @@ class GetCRMGOMiddleware(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Читает данные onboarding из GO CRM."""
-
         try:
             logger.info("===GetCRMGOMiddleware===")
 

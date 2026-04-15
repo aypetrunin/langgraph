@@ -1,42 +1,59 @@
-"""Модуль реализует общие функции."""
+"""Общие утилиты и глобальная конфигурация сервиса langgraph.
 
-import os
+Содержит:
+- Настройку логирования (logger).
+- Загрузку переменных окружения (.env) для локальной разработки.
+- Инициализацию глобальных LLM-моделей (model_4o_mini, model_4o_mini_reserv, model_4o)
+  с настроенными httpx-клиентами и прокси.
+- Декоратор retry_async для асинхронных ретраев с экспоненциальным бэкоффом.
+- Вспомогательные функции: _func_name (имя вызывающей функции),
+  _content_to_text (извлечение текста из LangChain message content).
+"""
+
 import asyncio
 import inspect
 import logging
+import os
 import random
-import httpx
-
 from functools import wraps
 from pathlib import Path
+
+import httpx
 from dotenv import load_dotenv
-from typing_extensions import Any, Awaitable, Callable, TypeVar
-
 from langchain.chat_models import init_chat_model
-
+from typing_extensions import Any, Awaitable, Callable, TypeVar
 
 T = TypeVar("T")
 
 # -------------------- Logging --------------------
-# Настройка логирования для вывода сообщений в консоль
 logging.basicConfig(
-    level=logging.INFO,  # минимальный уровень логирования INFO
-    format="%(asctime)s [%(levelname)s] %(message)s",  # формат: время [уровень] сообщение
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger(__name__)  # создаём логгер для текущего модуля
+logger = logging.getLogger(__name__)
 
 
+# -------------------- Загрузка .env (только для локальной разработки) ----------
+# В Docker переменные окружения приходят из docker-compose / deploy/*.env
 if not os.getenv("IS_DOCKER"):
     ROOT = Path(__file__).resolve().parents[3]
     dotenv_path = ROOT / "deploy" / "dev.env"
     load_dotenv(dotenv_path=dotenv_path)
 
+# -------------------- Конфигурация OpenAI --------------------
 openai_proxy = os.getenv("OPENAI_PROXY_URL")
 openai_model_4o_mini = os.getenv("OPENAI_MODEL_4O_MINI")
 openai_model_4o = os.getenv("OPENAI_MODEL_4O")
 openai_api_key = os.getenv("OPENAI_API_KEY")
 openai_api_key_reserv = os.getenv("OPENAI_API_KEY_RESERV")
+
+# -------------------- Глобальные LLM-модели --------------------
+# Синглтоны — создаются один раз при старте сервиса.
+# Каждый имеет собственный httpx.AsyncClient с настроенным прокси.
+# model_4o_mini        — основная модель (gpt-4o-mini)
+# model_4o_mini_reserv — резервная (другой API-ключ, используется при отказе основной)
+# model_4o             — более мощная модель (gpt-4o, для сложных задач)
 
 model_4o_mini = init_chat_model(
     model=openai_model_4o_mini,
@@ -44,7 +61,7 @@ model_4o_mini = init_chat_model(
     temperature=0,
     http_async_client=httpx.AsyncClient(
         proxy=openai_proxy,
-        timeout=60.0
+        timeout=60.0,
     ),
 )
 
@@ -54,10 +71,9 @@ model_4o_mini_reserv = init_chat_model(
     temperature=0,
     http_async_client=httpx.AsyncClient(
         proxy=openai_proxy,
-        timeout=60.0
+        timeout=60.0,
     ),
 )
-
 
 model_4o = init_chat_model(
     model=openai_model_4o,
@@ -65,7 +81,7 @@ model_4o = init_chat_model(
     temperature=0,
     http_async_client=httpx.AsyncClient(
         proxy=openai_proxy,
-        timeout=60.0
+        timeout=60.0,
     ),
 )
 

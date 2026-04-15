@@ -1,21 +1,27 @@
-# zena_middleware_wrap_tool.py
-#
-# Единая точка приема результатов MCP-tools в LangGraph.
-# Контракт MCP-серверов: Payload = {success: bool, data|code+error}
-# Fail-fast: если tool не вернул Payload — падаем сразу.
+"""Middleware-обёртка вокруг вызовов MCP-инструментов.
+
+ToolMonitoringMiddleware — единая точка приёма результатов MCP-tools:
+- Парсит ответ инструмента (JSON или строка) в унифицированный Envelope.
+- Валидирует контракт MCP-серверов: Payload = {success: bool, data|code+error}.
+- Применяет PostProcessor-колбэки для специфической постобработки
+  результатов отдельных инструментов (zena_product_search, zena_record_time и др.).
+- Сохраняет результаты в state['tools_result'] и обновляет dialog_state.
+
+Fail-fast: если tool не вернул Payload — ошибка прокидывается сразу.
+"""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional, Type
+from typing import Any, Awaitable, Callable, Type
 
-from langgraph.types import Command
-from langchain_core.messages import ToolMessage
-from langchain.tools.tool_node import ToolCallRequest
 from langchain.agents.middleware import AgentMiddleware
+from langchain.tools.tool_node import ToolCallRequest
+from langchain_core.messages import ToolMessage
+from langgraph.types import Command
 
-from .zena_common import logger, _content_to_text
+from .zena_common import _content_to_text, logger
 
 AVAILIABLE_PORT_ALENA = {15020, 5020}
 AVAILIABLE_PORT_DEFAULT = {15001, 5001, 5002, 15002, 15005, 5005, 15006, 5006, 15021, 5021, 15024, 5024, 15017, 5017}
@@ -31,8 +37,8 @@ PostProcessor = Callable[["Envelope", ToolCallRequest], Awaitable[Any]]
 class Envelope:
     success: bool
     data: Any = None
-    code: Optional[str] = None
-    error: Optional[str] = None
+    code: str | None = None
+    error: str | None = None
     raw: Any = None  # исходный распарсенный контент (для дебага)
 
     def is_ok(self) -> bool:
@@ -43,8 +49,7 @@ class Envelope:
 
 
 def _parse_tool_content(result: ToolMessage) -> Any:
-    """
-    ToolMessage.content обычно строка.
+    """ToolMessage.content обычно строка.
     Возвращает:
       - dict/list/... если удалось json.loads
       - иначе str (raw_content)
@@ -60,8 +65,7 @@ def _parse_tool_content(result: ToolMessage) -> Any:
 
 
 def _normalize_envelope(parsed: Any, *, tool_name: str | None = None) -> Envelope:
-    """
-    ЖЁСТКИЙ контракт (обязательный):
+    """ЖЁСТКИЙ контракт (обязательный):
       ok:  {"success": True,  "data": ...}
       err: {"success": False, "code": "...", "error": "..."}
 
@@ -115,8 +119,7 @@ async def _run_template(
     require_truthy_data: bool = True,
     require_success: bool = True,
 ) -> Any:
-    """
-    Общий шаблон: port_guard + envelope + (success?) + typecheck(data) + truthy(data) + on_ok.
+    """Общий шаблон: port_guard + envelope + (success?) + typecheck(data) + truthy(data) + on_ok.
     Возвращает env.data, либо None.
     """
     logger.info('_run_template')

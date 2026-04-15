@@ -1,28 +1,29 @@
+"""Middleware-обёртка вокруг вызова LLM-модели.
+
+DynamicSystemPrompt — загружает системный промпт из Google Docs (с фолбэком
+    на локальные шаблоны) и рендерит его через Jinja2 с данными из state.
+ToolSelectorMiddleware — фильтрует доступные инструменты на основе
+    текущего состояния диалога (FSM: new → selecting → record → posrecord).
+"""
+
 from __future__ import annotations
 
-from typing import Any, Callable
-
-
-import aiofiles
-import os
 import hashlib
-
+import os
 from pathlib import Path
 from typing import Callable
-from jinja2 import Template, Environment, StrictUndefined, DebugUndefined
 
-from langchain_core.tools.structured import StructuredTool
-from langchain_core.language_models.chat_models import BaseChatModel
-
+import aiofiles
+from jinja2 import DebugUndefined, Environment, Template
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelRequest,
     ModelResponse,
     dynamic_prompt,
 )
+from langchain_core.tools.structured import StructuredTool
 
 from .zena_common import logger, model_4o, model_4o_mini
-from .zena_state import State, Context
 from .zena_google_doc import GoogleDocTemplateReader
 
 
@@ -63,8 +64,7 @@ class DynamicSystemPrompt(AgentMiddleware):
         return await handler(request.override(system_prompt=system_prompt))
 
     async def _load_template_source(self, request: ModelRequest, data: dict, is_dev: bool) -> str:
-        """
-        Правило выбора источника:
+        """Правило выбора источника:
         - Если есть URL (контекст или data) — читаем Google Doc
           (в dev можно брать URL и из template_prompt_system, если он выглядит как URL)
         - Иначе читаем файл template_prompt_system из template/
@@ -128,8 +128,7 @@ class DynamicSystemPrompt(AgentMiddleware):
 
 
 class ToolSelectorMiddleware(AgentMiddleware):
-    """
-    Middleware: решает, какие инструменты (tools) доступны модели (LLM) на каждом шаге.
+    """Middleware: решает, какие инструменты (tools) доступны модели (LLM) на каждом шаге.
 
     Есть 2 независимые ветки логики:
 
@@ -263,15 +262,13 @@ class ToolSelectorMiddleware(AgentMiddleware):
     # GUARDS
     # =========================================================================
     def _apply_guards(self, dialog_state: str, allowed: set[str], data: dict) -> set[str]:
-        """
-        A) Classic funnel guards (твои правила записи)
+        """A) Classic funnel guards (твои правила записи)
         B) Records management guards (просмотр/отмена/перенос)
 
         ВАЖНО: в ветке B мы теперь контролируем BOTH desired_date и desired_time:
           - слоты для переноса => нужен desired_date
           - финальный перенос => нужны desired_date + desired_time
         """
-
         logger.info(
             "DEBUG keys: office_id=%r desired_date=%r date=%r",
             data.get("office_id"), data.get("desired_date"), data.get("date")
@@ -329,8 +326,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
 
     @staticmethod
     def _has_desired_date(data: dict) -> bool:
-        """
-        desired_date — дата, на которую пользователь хочет перенести.
+        """desired_date — дата, на которую пользователь хочет перенести.
         Обычно хранится как строка (например "2026-01-28" или "28.01.2026").
         """
         d = str(data.get("desired_date") or "").strip()
@@ -442,7 +438,6 @@ class ToolSelectorMiddleware(AgentMiddleware):
 @dynamic_prompt
 async def personalized_prompt(request: ModelRequest) -> str:
     """Формирование промпта."""
-
     logger.info("==dynamic_prompt==")
     # logger.info(f'state: {request.state}')
     # logger.info(f'state: {request.state["data"]}')

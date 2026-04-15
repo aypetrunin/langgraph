@@ -1,8 +1,17 @@
+"""Диагностическая утилита для проверки подключения к MCP-серверам.
+
+Перебирает хосты (127.0.0.1, 172.17.0.1, localhost) для каждого порта
+и выводит список доступных инструментов.
+
+Запуск: uv run python -m src.zena_test_mcp_server
+"""
+
 import asyncio
 import logging
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_core.tools import BaseTool
 from typing import List
+
+from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

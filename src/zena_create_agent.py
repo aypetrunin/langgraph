@@ -1,4 +1,15 @@
-"""Модуль описывающий ноды графа."""
+"""Фабрика агентов с MCP-инструментами и middleware-стеком.
+
+Создаёт агента для конкретной компании (определяется по MCP-порту):
+1. Подключается к MCP-серверу по SSE и получает доступные инструменты.
+2. Собирает middleware-стек: валидация входа, загрузка данных из БД,
+   динамический системный промпт, фильтрация инструментов, мониторинг,
+   подсчёт токенов, fallback на резервную модель и т.д.
+3. Возвращает скомпилированный граф агента.
+
+Каждая компания (Sofia, Anisa, Alena и др.) получает свой экземпляр
+агента с отдельным набором MCP-инструментов.
+"""
 
 import os
 
@@ -14,33 +25,27 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph.state import CompiledStateGraph
 
 from .zena_common import logger, model_4o_mini, model_4o_mini_reserv
-from .zena_middleware_after_agent import (
-    ResetData,
-)
+from .zena_middleware_after_agent import ResetData
 from .zena_middleware_after_model import (
     GetCountToken,
     GetCRMGOOnboardStage,
     GetToolArgs,
 )
-
-# from .zena_memory import memory
 from .zena_middleware_before_agent import (
     GetDatabaseMiddleware,
     GetKeyWordMiddleware,
-    # DynamicMCPPortMiddleware,
     VerifyInputMessage,
 )
 from .zena_middleware_wrap_model import (
     DynamicSystemPrompt,
     ToolSelectorMiddleware,
 )
-from .zena_middleware_wrap_tool import (
-    ToolMonitoringMiddleware,
-)
+from .zena_middleware_wrap_tool import ToolMonitoringMiddleware
 from .zena_state import Context, State
 
 
 async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
+    """Создаёт агента с MCP-инструментами для указанного порта."""
 
     async def _get_tools(mcp_port: int) -> list[BaseTool]:
         """Получение инструментов из MCP-сервера по выбранному порту."""
@@ -61,30 +66,30 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
     tools_name = [tool.name for tool in tools]
     logger.info("create_agent_mcp tools (%s): %s", mcp_port, tools_name)
     
-    agent = create_agent( 
+    # Middleware-стек выполняется в порядке добавления:
+    # 1. before_agent: VerifyInputMessage → GetDatabaseMiddleware → GetKeyWordMiddleware
+    # 2. wrap_model:   DynamicSystemPrompt → ToolSelectorMiddleware
+    # 3. wrap_tool:    ToolMonitoringMiddleware
+    # 4. after_model:  GetCountToken → GetToolArgs → GetCRMGOOnboardStage
+    # 5. after_agent:  ResetData
+    # 6. built-in:     ContextEditingMiddleware → ModelFallbackMiddleware → ToolCallLimitMiddleware
+    agent = create_agent(
         model=model_4o_mini,
         state_schema=State,
         context_schema=Context,
-        system_prompt='Ты полезный помошник',
+        system_prompt="Ты полезный помощник",
         tools=tools,
         middleware=[
             VerifyInputMessage(),
             GetDatabaseMiddleware(),
             GetKeyWordMiddleware(),
-            # GetCRMGOMiddleware(),
-            # DynamicMCPPortMiddleware(),
             DynamicSystemPrompt(),
-            # personalized_prompt,
             ToolSelectorMiddleware(),
-            # SaveResultToolsMiddleware(),
-            # TrimMessages(),
             ToolMonitoringMiddleware(),
             GetCountToken(),
             GetToolArgs(),
             GetCRMGOOnboardStage(),
             ResetData(),
-            # SaveResponseAgent(),
-            
             ContextEditingMiddleware(
                 edits=[
                     ClearToolUsesEdit(
@@ -102,34 +107,7 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
             ),
             ToolCallLimitMiddleware(
                 run_limit=20,
-            )
-            # PIIMiddleware(
-            #     "phone",
-            #     detector = re.compile(r'^(\+?7|8)?[\s.-]?(\(?\d{3,5}\)?)?[\s.-]?\d{3}[\s.-]?\d{2}[\s.-]?\d{2}$'),
-            #     strategy="mask",
-            # ),
-            # PIIMiddleware(
-            #     "email",
-            #     strategy="mask",
-            # ),
-
-            # ToolRetryMiddleware(
-            #     max_retries=1,
-            #     backoff_factor=2.0,
-            #     initial_delay=1.0,
-            #     on_failure='return_message'
-            # ),
-
-            # SummarizationMiddleware(
-            #     model=model_4o_mini,
-            #     max_tokens_before_summary=4000,
-            #     messages_to_keep=10,
-            # ),
-
-            # LLMToolSelectorMiddleware(
-            #     model=model_4o_mini,
-            #     max_tools=2,
-            # ),
-        ]
+            ),
+        ],
     )
     return agent
