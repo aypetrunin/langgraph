@@ -1,21 +1,18 @@
 """Модуль описывающий ноды графа."""
 
-import os
 import time
 from pathlib import Path
 from typing import Literal, Union
 
 import aiofiles
-import httpx
 from jinja2 import Template
-from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-from .zena_common import _content_to_text, _func_name, logger
+from .zena_common import _content_to_text, _func_name, logger, model_4o_mini
 from .zena_postgres import data_collection_postgres, delete_history_messages
 from .zena_state import Context, State
 
@@ -186,17 +183,7 @@ async def agent(state: State) -> State:
     try:
         t0 = time.perf_counter()
 
-        openai_proxy = os.getenv("OPENAI_PROXY_URL")
-        openai_model = os.getenv("OPENAI_MODEL")
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-
-        http_client = httpx.AsyncClient(proxy=openai_proxy, timeout=60.0)
-        model = init_chat_model(
-            model=openai_model,
-            temperature=0,
-            api_key=openai_api_key,
-            http_async_client=http_client,
-        ).bind_tools(state["tools"])
+        model = model_4o_mini.bind_tools(state["tools"])
 
         # Формируем сообщения с системным промптом
         messages = []
