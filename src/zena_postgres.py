@@ -1,17 +1,17 @@
 """Модуль реализует функции обращения к Postgres."""
 
-import json
+import asyncio
 import os
 from datetime import datetime
+from pathlib import Path
 
 import asyncpg
 from dotenv import load_dotenv
-from pathlib import Path
-from typing_extensions import Any, Dict, List, Iterable
+from typing_extensions import Any, Dict, Iterable, List
 
 from .zena_common import logger, retry_async
-from .zena_requests import fetch_personal_info, fetch_personal_records
 from .zena_request_masters_cache import fetch_masters_info
+from .zena_requests import fetch_personal_info
 
 if not os.getenv("IS_DOCKER"):
     ROOT = Path(__file__).resolve().parents[3]
@@ -24,8 +24,24 @@ POSTGRES_CONFIG = {
     "password": os.getenv("POSTGRES_PASSWORD"),
     "database": os.getenv("POSTGRES_DB"),
     "host": os.getenv("POSTGRES_HOST"),
-    "port": os.getenv("POSTGRES_PORT"),
+    "port": int(os.getenv("POSTGRES_PORT", "5432")),
 }
+
+_pool: asyncpg.Pool | None = None
+
+
+async def get_pool() -> asyncpg.Pool:
+    """Return the shared connection pool, creating it on first call."""
+    global _pool
+    if _pool is None or _pool._closed:
+        _pool = await asyncpg.create_pool(
+            **POSTGRES_CONFIG,
+            min_size=2,
+            max_size=10,
+            command_timeout=30,
+        )
+    return _pool
+
 
 async def get_weekday_info(dt: datetime | None = None) -> tuple[int, str]:
     """Асинхронно возвращает номер и название дня недели."""
@@ -56,24 +72,33 @@ def flatten_dict_no_prefix(d: dict[str, Any]) -> dict[str, Any]:
             items[key] = value
     return items
 
+
 async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
     """Функция получения всех данных из Postgres."""
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
-        # 1) Канальный контекст
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         channel_info = await fetch_channel_info(conn, user_companychat)
         channel_id = channel_info["channel_id"]
-        session_id = channel_info["session_id"]
         user_id = channel_info["user_id"]
 
-        # 2) Последовательный сбор данных
-        prompts_info = await fetch_prompts(conn, user_companychat)
-        category = await fetch_category(conn, channel_id)
-        products_full = await fetch_services(conn, channel_id)
-        probny = await fetch_probny(conn, channel_id)
-        first_dialog = await fetch_is_first_dialog(conn, user_companychat)
-        masters_info = await fetch_masters_info(channel_id)
-        user_info = await fetch_personal_info(user_id)
+        # Параллельный сбор данных после получения channel_info
+        (
+            prompts_info,
+            category,
+            products_full,
+            probny,
+            first_dialog,
+            masters_info,
+            user_info,
+        ) = await asyncio.gather(
+            fetch_prompts(conn, user_companychat),
+            fetch_category(conn, channel_id),
+            fetch_services(conn, channel_id),
+            fetch_probny(conn, channel_id),
+            fetch_is_first_dialog(conn, user_companychat),
+            fetch_masters_info(channel_id),
+            fetch_personal_info(user_id),
+        )
 
         now = datetime.now()
         weekday_num, weekday_name = await get_weekday_info(now)
@@ -96,57 +121,11 @@ async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
         flat_data = flatten_dict_no_prefix(data)
         return {"data": flat_data}
 
-    finally:
-        await conn.close()
-
-
-
-# async def data_collection_postgres(user_companychat: int) -> dict[str, Any]:
-#     """Функция получения всех данных из Postgres."""
-#     conn = await asyncpg.connect(**POSTGRES_CONFIG)
-#     try:
-#         # 1) Канальный контекст
-#         channel_info = await fetch_channel_info(conn, user_companychat)
-#         channel_id = channel_info["channel_id"]
-#         session_id = channel_info["session_id"]
-#         user_id = channel_info["user_id"]
-
-#         # 2) Параллельный сбор зависимых данных
-#         # Важно: на одном соединении asyncpg нельзя выполнять несколько запросов одновременно.
-#         # Поэтому либо запускаем их последовательно на одном conn, либо используем пул (см. вариант 2).
-#         # Здесь делаем последовательную выборку, а не gather на одном conn.
-#         prompts_info = await fetch_prompts(conn, user_companychat)
-#         category = await fetch_category(conn, channel_id)
-#         products_full = await fetch_services(conn, channel_id)
-#         probny = await fetch_probny(conn, channel_id)
-#         first_dialog = await fetch_is_first_dialog(conn, user_companychat)
-#         masters_info = await fetch_masters_info(channel_id)
-#         user_info = await fetch_personal_info(user_id)
-#         # user_records = await fetch_personal_records(user_companychat, channel_id)
-
-#         data = {
-#             "user_id": user_id,
-#             "date_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-#             **channel_info,
-#             "prompts_info": prompts_info,
-#             "category": category,
-#             "products_full" : products_full,
-#             "probny": probny,
-#             "first_dialog": first_dialog,
-#             "user_info": user_info,
-#             # "user_records": user_records,
-#             "masters_info": masters_info,
-#         }
-#         flat_data = flatten_dict_no_prefix(data)
-#         return {"data": flat_data}
-#     finally:
-#         await conn.close()
 
 async def data_user_info(user_companychat: int) -> dict[str, Any]:
     """Функция получения данных о пользователе и компании из Postgres."""
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
-        # 1) Канальный контекст
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         channel_info = await fetch_channel_info(conn, user_companychat)
         user_id = channel_info["user_id"]
         user_info = await fetch_personal_info(user_id)
@@ -159,8 +138,6 @@ async def data_user_info(user_companychat: int) -> dict[str, Any]:
         }
         flat_data = flatten_dict_no_prefix(data)
         return {"data": flat_data}
-    finally:
-        await conn.close()
 
 
 @retry_async()
@@ -184,7 +161,6 @@ async def fetch_dialog(conn: asyncpg.Connection, user_companychat: int) -> Any:
     joined_messages = "\n".join(messages)
     query = rows[-1]["message"]
     return joined_messages, query
-
 
 
 def pg_rows_to_products(rows: Iterable[asyncpg.Record]) -> list[dict[str, Any]]:
@@ -217,9 +193,9 @@ def pg_rows_to_products(rows: Iterable[asyncpg.Record]) -> list[dict[str, Any]]:
 
 @retry_async()
 async def fetch_key_words(channel_id: int, key_word: str) -> Any:
-    """Получение ключевых фраз"""
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
+    """Получение ключевых фраз."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
             select distinct on (p2.product_name)
@@ -245,24 +221,22 @@ async def fetch_key_words(channel_id: int, key_word: str) -> Any:
             return []
 
         return pg_rows_to_products(rows)
-    finally:
-        await conn.close()
 
 
 @retry_async()
 async def fetch_is_first_dialog(conn: asyncpg.Connection, user_companychat: int) -> bool:
-    """Определение, что диалог с ботом ведётся впервые"""
+    """Определение, что диалог с ботом ведётся впервые."""
     count = await conn.fetchval(
         """
         SELECT count(*)
-        FROM public.bot_history 
+        FROM public.bot_history
         WHERE user_companychat = $1
         AND indata NOT IN ('стоп', 'Память очищена')
         """,
         user_companychat,
     )
-    logger.info(f"=====fetch_is_first_dialog=====")
-    logger.info(f"count: {count}")
+    logger.info("=====fetch_is_first_dialog=====")
+    logger.info("count: %s", count)
     return count == 1
 
 
@@ -362,11 +336,13 @@ async def fetch_category(conn: asyncpg.Connection, channel_id: int) -> str:
     string_category = ", \n".join(list_category)
     return string_category
 
+
 @retry_async()
 async def fetch_services(conn: asyncpg.Connection, channel_id: int) -> str:
     """Получение товаров/услуг. Это нужно для компаний с малым количеством услуг.
-    Для примера Алена с количеством услуг 5 шт. channel_id=20"""
 
+    Для примера Алена с количеством услуг 5 шт. channel_id=20
+    """
     if channel_id not in [7, 20]:
         return []
 
@@ -428,102 +404,78 @@ async def fetch_probny(conn: asyncpg.Connection, channel_id: int) -> str:
 
 @retry_async()
 async def delete_history_messages(user_companychat: int) -> Dict[str, Any]:
-    """Удаление истории диалога. Используется для тестирования."""
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
+    """Удаление истории диалога."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         channel_info = await fetch_channel_info(conn, user_companychat)
         session_id = channel_info.get("session_id")
         if not session_id:
             logger.error(
-                f"Session ID not found for user_companychat={user_companychat}"
+                "Session ID not found for user_companychat=%s",
+                user_companychat,
             )
             return {"success": False, "error": "session_id not found"}
 
-        success = False
-        try:
-            async with conn.transaction():
-
-                del_bot_history  = await conn.execute(
-                    "DELETE FROM public.bot_history bh WHERE bh.user_companychat = $1;",
-                    user_companychat
-                )
-            success = True
-            logger.info(f"Данные из истории удалены: {del_bot_history}")
-        except Exception as e:
-            logger.error(f"Error deleting history messages: {e}")
-            success = False
-
-        return {"success": success}
-    finally:
-        await conn.close()
+        async with conn.transaction():
+            del_bot_history = await conn.execute(
+                "DELETE FROM public.bot_history bh WHERE bh.user_companychat = $1;",
+                user_companychat,
+            )
+        logger.info("Данные из истории удалены: %s", del_bot_history)
+        return {"success": True}
 
 
 @retry_async()
 async def delete_personal_data(user_companychat: int) -> Dict[str, Any]:
-    """Удаление истории диалога. Используется для тестирования."""
+    """Удаление персональных данных."""
     logger.info("===delete_personal_data===")
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         channel_info = await fetch_channel_info(conn, user_companychat)
-        logger.info(f"channel_info: {channel_info}")
-        success = False
-        try:
-            async with conn.transaction():
-                user_id = await conn.fetchval(
-                    '''
-                    select u.id
-                    from contact_companychat cc
-                    join "user" u on u.user_id = cc.user_chattype_id
-                    where cc.id = $1
-                    ''',
-                    user_companychat,
-                )
-                logger.info("user_id: %s", user_id)
-                del_personal_data_consent = await conn.execute(
-                    "DELETE FROM personal_data_consent WHERE user_id = $1", user_id
-                )
-                del_personal_data = await conn.execute(
-                    "DELETE FROM personal_data WHERE user_id = $1", user_id
-                )
-                del_user= await conn.execute(
-                    'DELETE FROM "user" WHERE id = $1', user_id
-                )
+        logger.info("channel_info: %s", channel_info)
 
-            success = True
-            logger.info(f"Персональные данные удалены: {del_personal_data_consent}, {del_personal_data}, {del_user}")
-        except Exception as e:
-            logger.error(f"Error deleting history messages: {e}")
-            success = False
+        async with conn.transaction():
+            user_id = await conn.fetchval(
+                '''
+                select u.id
+                from contact_companychat cc
+                join "user" u on u.user_id = cc.user_chattype_id
+                where cc.id = $1
+                ''',
+                user_companychat,
+            )
+            logger.info("user_id: %s", user_id)
+            del_consent = await conn.execute(
+                "DELETE FROM personal_data_consent WHERE user_id = $1", user_id
+            )
+            del_data = await conn.execute(
+                "DELETE FROM personal_data WHERE user_id = $1", user_id
+            )
+            del_user = await conn.execute(
+                'DELETE FROM "user" WHERE id = $1', user_id
+            )
 
-        return {"success": success}
-    finally:
-        await conn.close()
-
+        logger.info(
+            "Персональные данные удалены: %s, %s, %s",
+            del_consent, del_data, del_user,
+        )
+        return {"success": True}
 
 
 @retry_async()
-async def save_query_from_human_in_postgres(user_companychat: int, query: str) -> bool:
-    """Сохранение запроса клиента в Postgres. Необходимо при тестировании в Studio."""
-    conn = await asyncpg.connect(**POSTGRES_CONFIG)
-    try:
+async def save_query_from_human_in_postgres(
+    user_companychat: int, query: str
+) -> bool:
+    """Сохранение запроса клиента в Postgres."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO bot_history 
+            INSERT INTO bot_history
             (user_companychat, is_bot, for_user, dialog_state_id, created_at, indata)
-            VALUES 
+            VALUES
             ($1, $2, $3, $4, $5, $6)
             """,
-            user_companychat,  # $1
-            0,                 # $2
-            False,             # $3
-            1,                 # $4
-            datetime.now(),    # $5
-            query              # $6
+            user_companychat, 0, False, 1, datetime.now(), query,
         )
-        success = True
-    except Exception as e:
-        logger.error(f"Error saving query to bot_history: {e}")
-        success = False
-    finally:
-        await conn.close()
-        return success
+        return True
