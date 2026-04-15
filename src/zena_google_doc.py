@@ -1,4 +1,18 @@
-# google_doc_reader.py
+"""Модуль для чтения Google Docs через Drive API v3.
+
+Используется для загрузки шаблонов system prompt из Google Docs.
+Все HTTP-запросы выполняются через httpx (асинхронный клиент).
+Библиотеки httplib2 и googleapiclient НЕ используются, т.к. их SSL-стек
+не работает в Docker-контейнерах на WSL2 (IP-диапазон 192.178.x.x
+маршрутизируется локально, а не в интернет).
+
+Архитектура HTTP-клиентов:
+    _token_client  — прямое соединение к oauth2.googleapis.com (всегда доступен)
+    _drive_client  — соединение к www.googleapis.com, опционально через прокси
+                     (env GOOGLE_PROXY_URL, нужен только в WSL dev-окружении)
+
+На проде GOOGLE_PROXY_URL не задаётся → Drive API идёт напрямую.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -11,38 +25,59 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import httpx
+from google.auth import jwt as google_jwt
 from google.oauth2 import service_account
-from googleapiclient.discovery import build, Resource
 
 from .zena_common import logger, retry_async  # type: ignore
 
+# ────────────────────── Константы ──────────────────────
+
+# Regex для извлечения documentId из URL Google Docs
 _DOC_ID_RE = re.compile(r"/document/d/([a-zA-Z0-9_-]+)")
 
-# 🔐 кеш временного файла, чтобы не плодить файлы при retry
+# Эндпоинт обмена JWT → access_token (OAuth2 token endpoint)
+TOKEN_URI = "https://oauth2.googleapis.com/token"
+
+# OAuth2-скоуп: только чтение файлов из Google Drive
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+
+# Базовый URL Google Drive API v3
+DRIVE_API = "https://www.googleapis.com/drive/v3/files"
+
+# Таймаут HTTP-запросов (секунды)
+HTTP_TIMEOUT = 30.0
+
+# Количество попыток прогрева токена при инициализации
+_TOKEN_WARMUP_RETRIES = 3
+
+# ────────────────────── Service Account ──────────────────────
+
+# Кеш пути к временному файлу SA, чтобы не создавать новый при каждом retry
 _TMP_SA_FILE: str | None = None
 
+# Путь к SA-файлу в репозитории (fallback)
 BASE_DIR = Path(__file__).resolve().parents[3]  # /app
 SERVICE_ACCOUNT_FILE = str(BASE_DIR / "deploy" / "aiucopilot-d6773dc31cb0.json")
 
 
 def get_service_account_file() -> str:
-    """
-    Возвращает путь к json сервисного аккаунта.
+    """Возвращает путь к JSON-файлу сервисного аккаунта Google.
 
-    Приоритет:
-    1) SERVICE_ACCOUNT_FILE env — если передан путь и файл существует
-    2) SERVICE_ACCOUNT_FILE в репозитории (/deploy/...) — если существует
-    3) ранее созданный временный файл
-    4) GOOGLE_SA_JSON — строкой → пишем во временный файл
+    Приоритет источников:
+        1) ENV SERVICE_ACCOUNT_FILE — явный путь к файлу
+        2) Файл в репозитории (deploy/aiucopilot-*.json)
+        3) Ранее созданный временный файл (кешируется между вызовами)
+        4) ENV GOOGLE_SA_JSON — JSON-строка → записывается во временный файл
     """
     global _TMP_SA_FILE
 
     # 1) Явно переданный путь из env
-    path = os.getenv("SERVICE_ACCOUNT_FILE")
-    if path and Path(path).exists():
-        return path
+    env_path = os.getenv("SERVICE_ACCOUNT_FILE")
+    if env_path and Path(env_path).exists():
+        return env_path
 
-    # 2) fallback на файл в репозитории
+    # 2) Файл в репозитории
     if Path(SERVICE_ACCOUNT_FILE).exists():
         return SERVICE_ACCOUNT_FILE
 
@@ -50,15 +85,20 @@ def get_service_account_file() -> str:
     if _TMP_SA_FILE and Path(_TMP_SA_FILE).exists():
         return _TMP_SA_FILE
 
-    # 4) JSON из env
+    # 4) JSON-строка из env → пишем во временный файл
     sa_json = os.getenv("GOOGLE_SA_JSON")
     if not sa_json:
-        raise RuntimeError("Missing Google credentials: set GOOGLE_SA_JSON or SERVICE_ACCOUNT_FILE")
+        raise RuntimeError(
+            "Missing Google credentials: set GOOGLE_SA_JSON or SERVICE_ACCOUNT_FILE"
+        )
 
+    # Валидируем JSON перед записью
     json.loads(sa_json)
 
     tmp_dir = os.getenv("TMPDIR") or "/tmp"
-    tmp = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json", dir=tmp_dir)
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".json", dir=tmp_dir
+    )
     try:
         tmp.write(sa_json)
         tmp.flush()
@@ -69,35 +109,68 @@ def get_service_account_file() -> str:
     return _TMP_SA_FILE
 
 
+# ────────────────────── Утилиты ──────────────────────
+
+
 def extract_google_doc_id(url: str) -> str:
-    """Достаём documentId из URL вида https://docs.google.com/document/d/<DOC_ID>/edit..."""
+    """Извлекает documentId из URL Google Docs.
+
+    Поддерживаемые форматы:
+        https://docs.google.com/document/d/<DOC_ID>/edit
+        https://docs.google.com/document/d/<DOC_ID>/
+    """
     m = _DOC_ID_RE.search(url)
     if not m:
         raise ValueError(f"Cannot extract documentId from url: {url}")
     return m.group(1)
 
 
-def _build_drive_service(sa_file: str) -> Resource:
-    scopes = ["https://www.googleapis.com/auth/drive.readonly"]
-    creds = service_account.Credentials.from_service_account_file(sa_file, scopes=scopes)
-    return build("drive", "v3", credentials=creds, cache_discovery=False)
+# ────────────────────── Кеш ──────────────────────
 
 
 @dataclass
 class _CacheEntry:
-    text: str
-    fetched_at: float
-    checked_at: float
-    modified_time: Optional[str]
+    """Запись кеша содержимого Google Doc."""
+
+    text: str  # Текст документа (text/plain)
+    fetched_at: float  # Время последней загрузки (unix timestamp)
+    checked_at: float  # Время последней проверки modifiedTime
+    modified_time: Optional[str]  # modifiedTime из Google Drive API
+
+
+# ────────────────────── Основной класс ──────────────────────
 
 
 class GoogleDocTemplateReader:
-    """
-    Читает Google Doc по URL и возвращает его текст (export text/plain).
-    Есть кеш: TTL текста + периодическая проверка modifiedTime.
+    """Асинхронный reader для Google Docs с двухуровневым кешем.
+
+    Стратегия кеширования:
+        1) meta_check_ttl_sec (по умолчанию 10с) — проверяем modifiedTime
+           документа (лёгкий запрос, без скачивания текста). Если время
+           изменилось — перекачиваем текст.
+        2) cache_ttl_sec (по умолчанию 60с) — безусловно перекачиваем текст,
+           даже если modifiedTime не изменился.
+
+    HTTP-клиенты:
+        _token_client — для получения access_token с oauth2.googleapis.com.
+                        Прямое соединение (без прокси), т.к. этот хост
+                        доступен из любого окружения.
+        _drive_client — для запросов к www.googleapis.com (Drive API).
+                        Опционально через прокси (env GOOGLE_PROXY_URL),
+                        т.к. в WSL2 IP-диапазон 192.178.x.x маршрутизируется
+                        локально и www.googleapis.com недоступен напрямую.
+
+    Авторизация:
+        Используется Service Account с OAuth2. JWT assertion подписывается
+        локально (RSA, без HTTP-вызовов), затем обменивается на access_token
+        через POST к TOKEN_URI. Библиотеки requests/httplib2 НЕ используются —
+        весь HTTP через httpx.
     """
 
+    # Общий кеш текстов документов (class-level, расшарен между инстансами)
     _CACHE: dict[str, _CacheEntry] = {}
+
+    # Блокировки по doc_id для предотвращения параллельной загрузки одного документа
     _LOCKS: dict[str, asyncio.Lock] = {}
 
     def __init__(
@@ -111,94 +184,283 @@ class GoogleDocTemplateReader:
         self.service_account_file = service_account_file
         self.cache_ttl_sec = cache_ttl_sec
         self.meta_check_ttl_sec = meta_check_ttl_sec
-        self._drive: Resource | None = None
+
+        # Состояние access_token (обновляется через _refresh_token)
+        self._access_token: str | None = None
+        self._token_expiry: float = 0.0
+
+        # HTTP-клиенты (создаются лениво в _ensure_clients)
+        self._token_client: httpx.AsyncClient | None = None
+        self._drive_client: httpx.AsyncClient | None = None
+
+    # ──────────── Инициализация клиентов ────────────
 
     def _get_lock(self, key: str) -> asyncio.Lock:
+        """Возвращает asyncio.Lock для конкретного doc_id (lazy-создание)."""
         lock = self._LOCKS.get(key)
         if lock is None:
             lock = asyncio.Lock()
             self._LOCKS[key] = lock
         return lock
 
-    @retry_async()
-    async def _init_client(self) -> None:
+    async def _ensure_clients(self) -> None:
+        """Создаёт HTTP-клиенты и прогревает access_token если нужно.
+
+        Вызывается перед каждым запросом к Google API.
+        Идемпотентна — повторный вызов не пересоздаёт живые клиенты.
+        """
         if not self.service_account_file:
             self.service_account_file = get_service_account_file()
-        self._drive = await asyncio.to_thread(_build_drive_service, self.service_account_file)
 
-    async def _get_modified_time(self, doc_id: str) -> Optional[str]:
-        if not self._drive:
-            await self._init_client()
+        # Клиент для token refresh — прямое соединение к oauth2.googleapis.com
+        if self._token_client is None or self._token_client.is_closed:
+            self._token_client = httpx.AsyncClient(timeout=HTTP_TIMEOUT)
 
-        def _get() -> dict:
-            assert self._drive is not None
-            return (
-                self._drive.files()
-                .get(fileId=doc_id, fields="modifiedTime", supportsAllDrives=True)
-                .execute()
+        # Клиент для Drive API — через прокси если задан GOOGLE_PROXY_URL.
+        # На проде переменная не задана → proxy=None → прямое соединение.
+        # В WSL dev → прокси нужен, т.к. www.googleapis.com (192.178.x.x)
+        # маршрутизируется локально.
+        if self._drive_client is None or self._drive_client.is_closed:
+            proxy_url = os.getenv("GOOGLE_PROXY_URL")
+            self._drive_client = httpx.AsyncClient(
+                timeout=HTTP_TIMEOUT,
+                proxy=proxy_url,
             )
 
-        meta = await asyncio.to_thread(_get)
-        return meta.get("modifiedTime")
+        # Прогрев: получаем access_token при первом вызове.
+        # В WSL первое TCP-соединение к oauth2 может не пройти (transient),
+        # поэтому делаем до 3 попыток с паузой 1с.
+        if not self._access_token or time.time() >= self._token_expiry:
+            for attempt in range(_TOKEN_WARMUP_RETRIES):
+                try:
+                    await self._refresh_token()
+                    break
+                except (httpx.ConnectError, httpx.TimeoutException, OSError) as e:
+                    if attempt == _TOKEN_WARMUP_RETRIES - 1:
+                        raise
+                    logger.info(
+                        "Token warmup attempt %d failed: %s, retrying...",
+                        attempt + 1,
+                        e,
+                    )
+                    await asyncio.sleep(1.0)
+
+    # ──────────── Авторизация ────────────
+
+    async def _refresh_token(self) -> None:
+        """Получает новый access_token через OAuth2 JWT Bearer flow.
+
+        Шаги:
+            1) Загружает SA credentials из файла (локально, без HTTP)
+            2) Создаёт JWT assertion, подписанный приватным ключом SA
+            3) Отправляет POST на oauth2.googleapis.com/token через _token_client
+            4) Сохраняет access_token и время его истечения
+        """
+        assert self.service_account_file is not None
+        assert self._token_client is not None
+
+        # Загружаем credentials из SA-файла (только для получения signer и email)
+        creds = service_account.Credentials.from_service_account_file(
+            self.service_account_file, scopes=SCOPES
+        )
+
+        # Формируем JWT assertion (подпись RSA — локальная операция, без HTTP)
+        now = int(time.time())
+        assertion_bytes = google_jwt.encode(
+            creds._signer,
+            {
+                "iss": creds.service_account_email,  # issuer = SA email
+                "sub": creds.service_account_email,  # subject = SA email
+                "scope": " ".join(SCOPES),  # запрашиваемые скоупы
+                "aud": TOKEN_URI,  # audience = token endpoint
+                "iat": now,  # issued at
+                "exp": now + 3600,  # expires in 1 hour
+            },
+        )
+
+        # google.auth.jwt.encode() возвращает bytes — декодируем для form data
+        assertion_str = (
+            assertion_bytes.decode("utf-8")
+            if isinstance(assertion_bytes, bytes)
+            else assertion_bytes
+        )
+
+        # Обмениваем JWT assertion на access_token
+        resp = await self._token_client.post(
+            TOKEN_URI,
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": assertion_str,
+            },
+        )
+        if resp.status_code != 200:
+            logger.error(
+                "Token refresh failed: status=%s body=%s",
+                resp.status_code,
+                resp.text,
+            )
+        resp.raise_for_status()
+
+        token_data = resp.json()
+        self._access_token = token_data["access_token"]
+        # Обновляем токен за 60с до истечения, чтобы избежать race condition
+        self._token_expiry = time.time() + token_data.get("expires_in", 3600) - 60
+
+    async def _get_auth_headers(self) -> dict[str, str]:
+        """Возвращает Authorization header, обновляя токен если истёк."""
+        if not self._access_token or time.time() >= self._token_expiry:
+            await self._refresh_token()
+        assert self._access_token is not None
+        return {"Authorization": f"Bearer {self._access_token}"}
+
+    # ──────────── Google Drive API ────────────
+
+    async def _get_modified_time(self, doc_id: str) -> Optional[str]:
+        """Получает modifiedTime документа (лёгкий запрос без скачивания текста).
+
+        Используется для проверки: изменился ли документ с момента последней загрузки.
+        """
+        await self._ensure_clients()
+        assert self._drive_client is not None
+
+        headers = await self._get_auth_headers()
+        resp = await self._drive_client.get(
+            f"{DRIVE_API}/{doc_id}",
+            params={"fields": "modifiedTime", "supportsAllDrives": "true"},
+            headers=headers,
+        )
+        resp.raise_for_status()
+        return resp.json().get("modifiedTime")
 
     async def _export_text(self, doc_id: str) -> str:
-        if not self._drive:
-            await self._init_client()
+        """Скачивает содержимое Google Doc как plain text.
 
-        def _export() -> str:
-            assert self._drive is not None
-            req = self._drive.files().export(fileId=doc_id, mimeType="text/plain")
-            data = req.execute()
-            if isinstance(data, str):
-                return data
-            return data.decode("utf-8", errors="replace")
+        Использует Drive API export endpoint:
+            GET /files/{fileId}/export?mimeType=text/plain
+        """
+        await self._ensure_clients()
+        assert self._drive_client is not None
 
-        return await asyncio.to_thread(_export)
+        headers = await self._get_auth_headers()
+        resp = await self._drive_client.get(
+            f"{DRIVE_API}/{doc_id}/export",
+            params={"mimeType": "text/plain"},
+            headers=headers,
+        )
+        resp.raise_for_status()
+        return resp.text
+
+    # ──────────── Retry / Reset ────────────
+
+    def _reset_clients(self) -> None:
+        """Сбрасывает HTTP-клиенты и токен.
+
+        Вызывается при ошибках соединения перед retry,
+        чтобы следующая попытка создала свежие TCP-соединения.
+        """
+        self._token_client = None
+        self._drive_client = None
+        self._access_token = None
+        self._token_expiry = 0.0
+
+    # ──────────── Публичный API ────────────
 
     @retry_async()
     async def read_text(self) -> str:
+        """Читает текст Google Doc с кешированием и retry.
+
+        Декоратор @retry_async обеспечивает до 3 попыток с exponential backoff.
+        При ошибках соединения клиенты пересоздаются перед следующей попыткой.
+
+        Returns:
+            Текст документа (text/plain).
+        """
         doc_id = extract_google_doc_id(self.doc_url)
         now = time.time()
 
+        try:
+            return await self._read_text_inner(doc_id, now)
+        except (
+            TimeoutError,
+            OSError,
+            ConnectionError,
+            httpx.ConnectError,
+            httpx.TimeoutException,
+        ):
+            logger.warning("Connection error, resetting clients for retry")
+            self._reset_clients()
+            raise
+
+    async def _read_text_inner(self, doc_id: str, now: float) -> str:
+        """Внутренняя логика read_text с двухуровневым кешем.
+
+        Стратегия (под asyncio.Lock по doc_id):
+            1) Нет кеша → скачиваем текст + modifiedTime
+            2) meta_check_ttl истёк → проверяем modifiedTime;
+               если изменился → перекачиваем текст
+            3) cache_ttl истёк → безусловно перекачиваем текст
+            4) Иначе → отдаём кеш
+        """
         async with self._get_lock(doc_id):
             entry = self._CACHE.get(doc_id)
 
-            # 1) нет кеша — качаем
+            # 1) Нет кеша — первая загрузка
             if not entry:
+                logger.info("Google Doc %s: первая загрузка (нет кеша)", doc_id)
                 text = await self._export_text(doc_id)
                 mtime = await self._get_modified_time(doc_id)
-                self._CACHE[doc_id] = _CacheEntry(text=text, fetched_at=now, checked_at=now, modified_time=mtime)
+                self._CACHE[doc_id] = _CacheEntry(
+                    text=text, fetched_at=now, checked_at=now, modified_time=mtime
+                )
                 return text
 
             text_age = now - entry.fetched_at
             meta_age = now - entry.checked_at
 
-            # 2) периодически проверяем modifiedTime (это дешевле export)
+            # 2) Проверяем modifiedTime (дешевле, чем полный export)
             if meta_age >= self.meta_check_ttl_sec:
                 try:
                     mtime = await self._get_modified_time(doc_id)
                     entry.checked_at = now
 
+                    # Документ изменился — перекачиваем
                     if mtime and entry.modified_time and mtime != entry.modified_time:
+                        logger.info(
+                            "Google Doc %s: документ изменился, перезагрузка (old=%s, new=%s)",
+                            doc_id, entry.modified_time, mtime,
+                        )
                         text = await self._export_text(doc_id)
-                        self._CACHE[doc_id] = _CacheEntry(text=text, fetched_at=now, checked_at=now, modified_time=mtime)
+                        self._CACHE[doc_id] = _CacheEntry(
+                            text=text,
+                            fetched_at=now,
+                            checked_at=now,
+                            modified_time=mtime,
+                        )
                         return text
 
                     entry.modified_time = mtime or entry.modified_time
 
                 except Exception as e:
-                    # не валим запрос из-за метаданных
+                    # Ошибка метаданных не должна блокировать ответ — отдаём кеш
                     logger.warning(f"Metadata check failed for doc {doc_id}: {e}")
 
-            # 3) TTL текста истёк — обновим
+            # 3) TTL текста истёк — безусловное обновление
             if text_age >= self.cache_ttl_sec:
+                logger.info(
+                    "Google Doc %s: TTL кеша истёк (%.0fс), перезагрузка", doc_id, text_age
+                )
                 text = await self._export_text(doc_id)
                 mtime = await self._get_modified_time(doc_id)
-                self._CACHE[doc_id] = _CacheEntry(text=text, fetched_at=now, checked_at=now, modified_time=mtime)
+                self._CACHE[doc_id] = _CacheEntry(
+                    text=text, fetched_at=now, checked_at=now, modified_time=mtime
+                )
                 return text
 
-            # 4) отдаём кеш
+            # 4) Кеш актуален
+            logger.info("Google Doc %s: отдаём из кеша (возраст %.0fс)", doc_id, text_age)
             return entry.text
+
+    # ──────────── Фабрика ────────────
 
     @classmethod
     async def create(
@@ -207,12 +469,16 @@ class GoogleDocTemplateReader:
         service_account_file: Optional[str] = None,
         cache_ttl_sec: int = 60,
         meta_check_ttl_sec: int = 10,
-    ) -> "GoogleDocTemplateReader":
-        self = cls(
+    ) -> GoogleDocTemplateReader:
+        """Фабричный метод: создаёт reader и инициализирует HTTP-клиенты + токен.
+
+        Использовать вместо __init__, т.к. инициализация асинхронная.
+        """
+        reader = cls(
             doc_url=doc_url,
             service_account_file=service_account_file,
             cache_ttl_sec=cache_ttl_sec,
             meta_check_ttl_sec=meta_check_ttl_sec,
         )
-        await self._init_client()
-        return self
+        await reader._ensure_clients()
+        return reader

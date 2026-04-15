@@ -27,6 +27,8 @@ from .zena_google_doc import GoogleDocTemplateReader
 
 
 class DynamicSystemPrompt(AgentMiddleware):
+    _readers: dict[str, GoogleDocTemplateReader] = {}
+
     async def awrap_model_call(
         self,
         request: ModelRequest,
@@ -70,11 +72,14 @@ class DynamicSystemPrompt(AgentMiddleware):
         doc_url = self._resolve_doc_url(request=request, data=data, is_dev=is_dev)
 
         if doc_url:
-            reader = await GoogleDocTemplateReader.create(
-                doc_url=doc_url,
-                cache_ttl_sec=120,
-                meta_check_ttl_sec=60,
-            )
+            reader = self._readers.get(doc_url)
+            if reader is None:
+                reader = await GoogleDocTemplateReader.create(
+                    doc_url=doc_url,
+                    cache_ttl_sec=120,
+                    meta_check_ttl_sec=60,
+                )
+                self._readers[doc_url] = reader
             return await reader.read_text()
 
         tpl_name = data.get("template_prompt_system")
