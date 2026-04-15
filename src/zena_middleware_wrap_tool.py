@@ -13,6 +13,7 @@ Fail-fast: если tool не вернул Payload — ошибка прокид
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Type
 
@@ -21,7 +22,10 @@ from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
-from .zena_common import _content_to_text, logger
+from .zena_common import _content_to_text
+from .zena_logging import get_logger
+
+logger = get_logger()
 
 AVAILIABLE_PORT_ALENA = {15020, 5020}
 AVAILIABLE_PORT_DEFAULT = {15001, 5001, 5002, 15002, 15005, 5005, 15006, 5006, 15021, 5021, 15024, 5024, 15017, 5017}
@@ -60,7 +64,7 @@ def _parse_tool_content(result: ToolMessage) -> Any:
       - иначе str (raw_content)
     """
     raw_content = _content_to_text(getattr(result, "content", ""))
-    logger.info("raw_content: %s", raw_content)
+    logger.debug("tool.raw_content", content=raw_content)
     if not raw_content or not raw_content.strip():
         return ""  # иногда tool возвращает пустое
     try:
@@ -132,7 +136,7 @@ async def _run_template(
 
     Возвращает env.data, либо None.
     """
-    logger.info('_run_template')
+    logger.debug("tool.run_template")
     if not port_guard(request):
         return None
 
@@ -147,9 +151,12 @@ async def _run_template(
 
     state_data = request.state["data"]
     on_ok(state_data, data_value, request)
-    logger.info("state_data['dialog_state']: %s", state_data['dialog_state'])
-    logger.info("state_data['desired_date']: %s", state_data['desired_date'])
-    logger.info("state_data['desired_time']: %s", state_data['desired_time'])
+    logger.debug(
+        "tool.state_update",
+        dialog_state=state_data.get("dialog_state"),
+        desired_date=state_data.get("desired_date"),
+        desired_time=state_data.get("desired_time"),
+    )
     return data_value
 
 
@@ -223,7 +230,7 @@ async def pp_available_time_for_master(env: Envelope, request: ToolCallRequest) 
 
 async def pp_available_time_for_master_list(env: Envelope, request: ToolCallRequest) -> Any:
     """Сохраняет список доступного времени и последовательностей в state."""
-    logger.info('pp_available_time_for_master_list')
+    logger.debug("tool.postprocess", processor="pp_available_time_for_master_list")
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
         if len(tools_data) < 2:
             return
@@ -238,7 +245,7 @@ async def pp_available_time_for_master_list(env: Envelope, request: ToolCallRequ
 
 async def pp_record_time(env: Envelope, request: ToolCallRequest) -> Any:
     """Обновляет state после успешной записи клиента на услугу."""
-    logger.info('pp_record_time')
+    logger.debug("tool.postprocess", processor="pp_record_time")
     def on_ok(data: dict, tools_data: dict, request: ToolCallRequest) -> None:
         tool_args = request.tool_call.get("args") or {}
         data["dialog_state"] = "postrecord"
@@ -316,7 +323,7 @@ async def pp_call_administrator(env: Envelope, request: ToolCallRequest) -> Any:
 
 async def pp_records(env: Envelope, request: ToolCallRequest) -> Any:
     """Сохраняет список записей клиента в state."""
-    logger.info('pp_records')
+    logger.debug("tool.postprocess", processor="pp_records")
     def on_ok(data: dict, tools_data: list, request: ToolCallRequest) -> None:
         if tools_data:
             data["user_records"] = tools_data
@@ -337,7 +344,7 @@ async def pp_records(env: Envelope, request: ToolCallRequest) -> Any:
 
 async def pp_record_delete(env: Envelope, request: ToolCallRequest) -> Any:
     """Очищает записи клиента в state после успешной отмены."""
-    logger.info('pp_record_delete')
+    logger.debug("tool.postprocess", processor="pp_record_delete")
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         data["user_records"] = []
         data["desired_date"] = None
@@ -355,7 +362,7 @@ async def pp_record_delete(env: Envelope, request: ToolCallRequest) -> Any:
 
 async def pp_record_reschedule(env: Envelope, request: ToolCallRequest) -> Any:
     """Очищает записи клиента в state после успешного переноса."""
-    logger.info('pp_record_reschedule')
+    logger.debug("tool.postprocess", processor="pp_record_reschedule")
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         data["user_records"] = []
         data["desired_date"] = None
@@ -446,12 +453,11 @@ async def pp_product_remember(env: Envelope, request: ToolCallRequest) -> Any:
     """Сохраняет выбранные продукты в state и возвращает их список."""
     items_out: list[dict] = []
 
-    logger.info('pp_product_remember')
-    logger.info("")
+    logger.debug("tool.postprocess", processor="pp_product_remember")
 
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         nonlocal items_out
-        logger.info("tools_data: %s", tools_data)
+        logger.debug("tool.data", data=tools_data)
         products: list[Any] = tools_data or []
         items_out = [parse_item(x) for x in products if isinstance(x, dict)]
         if not items_out:
@@ -630,25 +636,20 @@ class ToolMonitoringMiddleware(AgentMiddleware):
         tool_name = request.tool_call.get("name")
         tool_args = request.tool_call.get("args")
 
-        logger.info("===wrap_tool_call===ToolMonitoringMiddleware===")
-        logger.info("Executing tool: %s", tool_name)
-        logger.info("Tool arguments: %s", tool_args)
+        logger.info("tool.started", tool=tool_name)
+        logger.debug("tool.args", tool=tool_name, args=tool_args)
 
         try:
+            t0 = time.perf_counter()
             result = await handler(request)
+            duration = round(time.perf_counter() - t0, 3)
 
             parsed = _parse_tool_content(result) if isinstance(result, ToolMessage) else result
 
             # FAIL-FAST тут: если contract violation — RuntimeError улетит вверх.
             env = _normalize_envelope(parsed, tool_name=tool_name)
 
-            logger.info(
-                "Tool envelope: success=%s code=%s error=%s data_type=%s",
-                env.success,
-                env.code,
-                env.error,
-                type(env.data).__name__,
-            )
+            logger.info("tool.finished", tool=tool_name, success=env.success, code=env.code, duration_sec=duration)
 
             registry = _get_registry_for_request(request)
 
@@ -675,6 +676,6 @@ class ToolMonitoringMiddleware(AgentMiddleware):
 
             return result
 
-        except Exception as e:
-            logger.exception("Tool failed: %s", e)
+        except Exception:
+            logger.exception("tool.error", tool=tool_name)
             raise
