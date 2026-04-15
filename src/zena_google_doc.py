@@ -442,7 +442,7 @@ class GoogleDocTemplateReader:
 
                 except Exception as e:
                     # Ошибка метаданных не должна блокировать ответ — отдаём кеш
-                    logger.warning(f"Metadata check failed for doc {doc_id}: {e}")
+                    logger.warning("Metadata check failed for doc %s: %s", doc_id, e)
 
             # 3) TTL текста истёк — безусловное обновление
             if text_age >= self.cache_ttl_sec:

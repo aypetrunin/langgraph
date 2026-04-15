@@ -73,7 +73,7 @@ async def create_agent_mcp(mcp_port: int) -> CompiledStateGraph:
     tools = await _get_tools(mcp_port)
     
     tools_name = [tool.name for tool in tools]
-    logger.info(f"create_agent_mcp tools ({mcp_port}): {tools_name}")
+    logger.info("create_agent_mcp tools (%s): %s", mcp_port, tools_name)
     
     agent = create_agent( 
         model=model_4o_mini,

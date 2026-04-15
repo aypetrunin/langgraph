@@ -134,9 +134,9 @@ async def _run_template(
 
     state_data = request.state["data"]
     on_ok(state_data, data_value, request)
-    logger.info(f"state_data['dialog_state']: {state_data['dialog_state']}")
-    logger.info(f"state_data['desired_date']: {state_data['desired_date']}")
-    logger.info(f"state_data['desired_time']: {state_data['desired_time']}")
+    logger.info("state_data['dialog_state']: %s", state_data['dialog_state'])
+    logger.info("state_data['desired_date']: %s", state_data['desired_date'])
+    logger.info("state_data['desired_time']: %s", state_data['desired_time'])
     return data_value
 
 
@@ -418,11 +418,11 @@ async def pp_product_remember(env: Envelope, request: ToolCallRequest) -> Any:
     items_out: list[dict] = []
 
     logger.info('pp_product_remember')
-    logger.info(f"")
+    logger.info("")
 
     def on_ok(data: dict, tools_data: Any, request: ToolCallRequest) -> None:
         nonlocal items_out
-        logger.info(f"tools_data: {tools_data}")
+        logger.info("tools_data: %s", tools_data)
         products: list[Any] = tools_data or []
         items_out = [parse_item(x) for x in products if isinstance(x, dict)]
         if not items_out:

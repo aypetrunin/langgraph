@@ -29,7 +29,7 @@ class TrimMessages(AgentMiddleware):
         if not messages:
             return None
 
-        logger.info(f"Количество сообщений: {len(messages)}. Максимум: {MAX_COUNT_MESSAGES}")
+        logger.info("Количество сообщений: %d. Максимум: %d", len(messages), MAX_COUNT_MESSAGES)
 
         if len(messages) <= MAX_COUNT_MESSAGES:
             return None
@@ -38,7 +38,7 @@ class TrimMessages(AgentMiddleware):
         recent_messages = messages[-MAX_COUNT_MESSAGES:] if len(messages) % 2 == 0 else messages[-MAX_COUNT_MESSAGES-1:]
         new_messages = [first_msg] + recent_messages
 
-        logger.info(f"Количество сообщений обрезано до : {MAX_COUNT_MESSAGES} шт.")
+        logger.info("Количество сообщений обрезано до : %d шт.", MAX_COUNT_MESSAGES)
 
         return {
             "messages": [

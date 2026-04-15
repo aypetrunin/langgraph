@@ -56,7 +56,7 @@ class VerifyInputMessage(AgentMiddleware):
             ctx = runtime.context or {}
             user_companychat = ctx.get("_user_companychat")
             studio = ctx.get("_studio", False)
-            logger.info(f"studio: {studio}")
+            logger.info("studio: %s", studio)
 
 
             messages = state["messages"]
@@ -103,7 +103,7 @@ class VerifyInputMessage(AgentMiddleware):
                 }
 
         except Exception as err:
-            logger.exception(f"VerifyInputMessage: {err}")
+            logger.exception("VerifyInputMessage: %s", err)
             return {
                 "messages": [AIMessage(content='Бот временно не работает')],
                 "jump_to": "end"
@@ -216,10 +216,10 @@ class GetKeyWordMiddleware(AgentMiddleware):
             )
             last_message = _content_to_text(last_msg_content).strip()
 
-            logger.info(f"last_message: {last_message}")
+            logger.info("last_message: %s", last_message)
 
             promo = await fetch_key_words(channel_id, last_message)
-            logger.info(f"promo: {promo}")
+            logger.info("promo: %s", promo)
 
             if not promo:
                 return None
@@ -228,7 +228,7 @@ class GetKeyWordMiddleware(AgentMiddleware):
             data['items_search'] = promo
             data['dialog_state'] = 'promo'
 
-            logger.info(f"data: {data}")
+            logger.info("data: %s", data)
 
             return {
                 **data
@@ -269,16 +269,16 @@ class GetCRMGOMiddleware(AgentMiddleware):
             
             if not state.get("data", {}).get('onboarding'):
                 # Получаем и обрабатываем данные CRM
-                logger.info(f"fetch_crm_go_client_info")
+                logger.info("fetch_crm_go_client_info")
                 raw_onboarding = await fetch_crm_go_client_info(phone=phone)
                 data["onboarding"] = raw_onboarding
 
-            logger.info(f"onboarding: {data['onboarding']}")
+            logger.info("onboarding: %s", data['onboarding'])
 
             return {"data": data}
 
         except Exception as err:
-            logger.exception(f"GetCRMGOMiddleware: {err}")
+            logger.exception("GetCRMGOMiddleware: %s", err)
             return {
                 "messages": [AIMessage(content='Бот временно не работает')],
                 "jump_to": "end"

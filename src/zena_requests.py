@@ -20,14 +20,14 @@ async def fetch_personal_info(user_id: int) -> dict[str, Any]:
 
     url = f"https://httpservice.ai2b.pro/v1/vk/personal-data/{user_id}"
 
-    logger.info(f"Отправка запроса: {url}")
+    logger.info("Отправка запроса: %s", url)
 
     timeout = aiohttp.ClientTimeout(total=120)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url) as resp:
             if resp.status == 200:
                 return await resp.json()
-            logger.warning(f"Ошибка запроса: {resp.status}")
+            logger.warning("Ошибка запроса: %s", resp.status)
             raise RuntimeError(f"Ошибка запроса: {resp.status}")
 
 
@@ -88,16 +88,16 @@ async def fetch_personal_records(
         "channel_id": channel_id
     }
 
-    logger.info(f"Отправка запроса: {url}")
+    logger.info("Отправка запроса: %s", url)
 
     timeout = aiohttp.ClientTimeout(total=120)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, json=payload) as resp:
              if resp.status == 200:
                 responce = await resp.json()
-                logger.info(f"responce: {responce}")
+                logger.info("responce: %s", responce)
                 responce_format = analyze_response(responce)
-                logger.info(f"responce_format: {responce_format}")
+                logger.info("responce_format: %s", responce_format)
                 return responce_format
 
 
@@ -118,20 +118,20 @@ async def fetch_crm_go_client_info(
 
     url = f"https://httpservice.ai2b.pro/appointments/go_crm/client_card_by_phone"
 
-    logger.info(f"Отправка запроса: {url}, payload: {payload}")
+    logger.info("Отправка запроса: %s, payload: %s", url, payload)
 
     timeout = aiohttp.ClientTimeout(total=10)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, json=payload) as resp:
              if resp.status == 200:
                 responce = await resp.json()
-                logger.info(f"responce: {responce}")
+                logger.info("responce: %s", responce)
                 return responce
-        
+
         if resp.status == 404:
             return {'success': False, 'message': "Клиента нет базе данных"}
         else:
-            logger.warning(f"Ошибка запроса: {resp.status}")
+            logger.warning("Ошибка запроса: %s", resp.status)
             raise RuntimeError(f"Ошибка запроса: {resp.status}")
     
     return {'success': False, 'message': "Клиента нет базе данных"}
@@ -163,13 +163,13 @@ async def sent_message_to_history(
                 # Если сервер возвращает JSON
                 return await resp.json()
     except aiohttp.ClientResponseError as e:
-        logger.warning(f"HTTP error: {e.status} {e.message}")
+        logger.warning("HTTP error: %s %s", e.status, e.message)
         raise
     except (aiohttp.ConnectionTimeoutError, aiohttp.ServerTimeoutError):
         logger.warning("Request timed out")
         raise
     except aiohttp.ClientError as e:
-        logger.warning(f"Client error: {e}")
+        logger.warning("Client error: %s", e)
         raise
 
 

@@ -231,9 +231,9 @@ class ToolSelectorMiddleware(AgentMiddleware):
 
         if mcp_port in self.CLASSIC_PORTS:
             allowed = self._allowed_for_classic_ports(dialog_state, data, base)
-            logger.info(f"allowed: {allowed}")
+            logger.info("allowed: %s", allowed)
             responce = self._apply_guards(dialog_state, allowed, data)
-            logger.info(f"responce _apply_guards: {responce}")
+            logger.info("responce _apply_guards: %s", responce)
             return responce
 
         return self._apply_guards(dialog_state, base, data)
@@ -342,7 +342,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
         office_id = str(data.get("office_id") or "").strip()
         desired_date = str(data.get("desired_date") or "").strip()
         responce = bool(office_id and desired_date)
-        logger.info(f"responce: {responce}")
+        logger.info("responce: %s", responce)
         return responce
 
     @staticmethod
@@ -457,6 +457,6 @@ async def personalized_prompt(request: ModelRequest) -> str:
     # logger.info(f'\nstate: {request.state}')
     system_prompt = Template(source).render(**data)
     # system_prompt = Template(source).render(**request.state.get("data", {}))
-    logger.info(f"system_prompt:\n{system_prompt}")
+    logger.info("system_prompt:\n%s", system_prompt)
 
     return system_prompt

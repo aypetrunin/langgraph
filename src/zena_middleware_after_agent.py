@@ -51,14 +51,14 @@ class SaveResponseAgent(AgentMiddleware):
             response = await sent_message_to_history(**payload)
 
             if response.get('status', 'not')=='ok':
-                logger.info(f"Ответ агента сохранен в postgres.")
+                logger.info("Ответ агента сохранен в postgres.")
             else:
-                logger.error(f"Ошибка сохранения ответа агента в postgres.")
+                logger.error("Ошибка сохранения ответа агента в postgres.")
 
             return None
-        
+
         except Exception as err:
-            logger.exception(f"SaveResponseAgent: {err}")
+            logger.exception("SaveResponseAgent: %s", err)
             return None
         # content = _content_to_text(state['messages'][-1].content)
         # responce_mem = await memory.add(

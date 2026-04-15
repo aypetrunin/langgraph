@@ -84,7 +84,7 @@ class GetToolArgs(AgentMiddleware):
             for tool in tool_calls
         ]
 
-        logger.info(f"Tool args: {tools_args}")
+        logger.info("Tool args: %s", tools_args)
 
         return {
             "tools_args": tools_args

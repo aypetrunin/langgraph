@@ -12,7 +12,7 @@ async def _get_tools(mcp_port: int) -> List[BaseTool]:
     # Пробуем оба адреса
     for host in ["127.0.0.1", "172.17.0.1", "localhost"]:
         url = f"http://{host}:{mcp_port}/sse"
-        logger.info(f"Пробуем подключиться к {url}")
+        logger.info("Пробуем подключиться к %s", url)
         try:
             client = MultiServerMCPClient({
                 "company": {
@@ -21,10 +21,10 @@ async def _get_tools(mcp_port: int) -> List[BaseTool]:
                 }
             })
             tools = await client.get_tools()
-            logger.info(f"✅ УСПЕХ на {host}:{mcp_port}")
+            logger.info("✅ УСПЕХ на %s:%s", host, mcp_port)
             return tools
         except Exception as e:
-            logger.warning(f"❌ {host}:{mcp_port} недоступен: {e}")
+            logger.warning("❌ %s:%s недоступен: %s", host, mcp_port, e)
             continue
     raise Exception(f"Все адреса для порта {mcp_port} недоступны")
 
@@ -34,9 +34,9 @@ async def main():
         try:
             tools = await _get_tools(port)
             tools_name = [tool.name for tool in tools]
-            logger.info(f"create_agent_mcp tools ({port}): {tools_name}")
+            logger.info("create_agent_mcp tools (%s): %s", port, tools_name)
         except Exception as e:
-            logger.error(f"❌ Порт {port} полностью недоступен: {e}")
+            logger.error("❌ Порт %s полностью недоступен: %s", port, e)
 
 if __name__ == "__main__":
     asyncio.run(main())
