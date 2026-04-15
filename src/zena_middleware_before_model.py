@@ -15,8 +15,10 @@ from langchain.messages import RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 
-from .zena_common import logger
+from .zena_logging import get_logger
 from .zena_state import Context, State
+
+logger = get_logger()
 
 
 class TrimMessages(AgentMiddleware):
@@ -28,7 +30,7 @@ class TrimMessages(AgentMiddleware):
             runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Ограничение количества сообщений для модели."""
-        logger.info("===before_model===TrimMessages===")
+        logger.info("middleware.started", middleware="TrimMessages")
 
         MAX_COUNT_MESSAGES = int(os.getenv("MAX_MESSAGES_HISTORY", "20"))
 
@@ -38,7 +40,7 @@ class TrimMessages(AgentMiddleware):
         if not messages:
             return None
 
-        logger.info("Количество сообщений: %d. Максимум: %d", len(messages), MAX_COUNT_MESSAGES)
+        logger.debug("trim.check", messages_count=len(messages), max_count=MAX_COUNT_MESSAGES)
 
         if len(messages) <= MAX_COUNT_MESSAGES:
             return None
@@ -47,7 +49,7 @@ class TrimMessages(AgentMiddleware):
         recent_messages = messages[-MAX_COUNT_MESSAGES:] if len(messages) % 2 == 0 else messages[-MAX_COUNT_MESSAGES-1:]
         new_messages = [first_msg] + recent_messages
 
-        logger.info("Количество сообщений обрезано до : %d шт.", MAX_COUNT_MESSAGES)
+        logger.info("trim.applied", messages_kept=MAX_COUNT_MESSAGES)
 
         return {
             "messages": [

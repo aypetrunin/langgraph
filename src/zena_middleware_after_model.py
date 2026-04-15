@@ -14,8 +14,10 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage
 from langgraph.runtime import Runtime
 
-from .zena_common import logger
+from .zena_logging import get_logger
 from .zena_state import Context, State
+
+logger = get_logger()
 
 
 class GetCRMGOOnboardStage(AgentMiddleware):
@@ -27,7 +29,7 @@ class GetCRMGOOnboardStage(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Инкрементирует onboarding_stage после ответа модели."""
-        logger.info("=== after_model: GetCRMGOOnboardStage  ===")
+        logger.info("middleware.started", middleware="GetCRMGOOnboardStage")
 
         data = state.get("data", {})
         # logger.info(f'data: {data}')
@@ -46,7 +48,7 @@ class GetCRMGOOnboardStage(AgentMiddleware):
             return None
 
         tool_calls: list[Any] | None = getattr(last_message, "tool_calls", None)
-        logger.info("tool_calls: %s", tool_calls)
+        logger.debug("model.tool_calls", tool_calls=tool_calls)
         if tool_calls:
             return None
 
@@ -75,7 +77,7 @@ class GetToolArgs(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Извлекает аргументы вызовов инструментов из последнего AIMessage."""
-        logger.info("=== after_model: GetToolArgs ===")
+        logger.info("middleware.started", middleware="GetToolArgs")
 
         messages: list[AnyMessage] | None = state.get("messages")
         if not messages:
@@ -94,7 +96,7 @@ class GetToolArgs(AgentMiddleware):
             for tool in tool_calls
         ]
 
-        logger.info("Tool args: %s", tools_args)
+        logger.debug("tool.args_extracted", tools_args=tools_args)
 
         return {
             "tools_args": tools_args
@@ -110,7 +112,7 @@ class GetCountToken(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Подсчитывает токены из usage_metadata и накапливает их в state."""
-        logger.info("===after_model===CountToken===")
+        logger.info("middleware.started", middleware="GetCountToken")
 
         messages: list[BaseMessage] | None = cast(
             list[BaseMessage] | None, state.get("messages")
@@ -126,7 +128,7 @@ class GetCountToken(AgentMiddleware):
 
         tokens_update: dict[str, int] = self._calculate_tokens_update(state, state.get("tokens", {}), usage)
 
-        logger.info("tokens=%s", tokens_update)
+        logger.info("tokens.counted", **tokens_update)
 
         return {
             "tokens": tokens_update
