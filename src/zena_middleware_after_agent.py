@@ -11,9 +11,12 @@ from typing import Any
 from langchain.agents.middleware import AgentMiddleware
 from langgraph.runtime import Runtime
 
-from .zena_common import _content_to_text, logger
+from .zena_common import _content_to_text
 from .zena_httpservice import sent_message_to_history
+from .zena_logging import get_logger
 from .zena_state import RESET, Context, State
+
+logger = get_logger()
 
 
 class SaveResponseAgent(AgentMiddleware):
@@ -25,7 +28,7 @@ class SaveResponseAgent(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Отправляет текст ответа, использованные инструменты и токены в httpservice."""
-        logger.info("===after_agent===SaveResponseAgent===")
+        logger.info("middleware.started", middleware="SaveResponseAgent")
 
         try:
             data = state.get("data", {})
@@ -65,14 +68,14 @@ class SaveResponseAgent(AgentMiddleware):
             response = await sent_message_to_history(**payload)
 
             if response.get("status", "not") == "ok":
-                logger.info("Ответ агента сохранен в postgres.")
+                logger.info("response.saved", success=True)
             else:
-                logger.error("Ошибка сохранения ответа агента в postgres.")
+                logger.error("response.saved", success=False)
 
             return None
 
-        except Exception as err:
-            logger.exception("SaveResponseAgent: %s", err)
+        except Exception:
+            logger.exception("middleware.error", middleware="SaveResponseAgent")
             return None
 
 
@@ -89,7 +92,7 @@ class ResetData(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Возвращает RESET для списковых полей и нули для токенов."""
-        logger.info("===after_agent===ResetData===")
+        logger.info("middleware.started", middleware="ResetData")
 
         return {
             "tools_args": RESET,
