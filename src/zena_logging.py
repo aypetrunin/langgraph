@@ -12,6 +12,7 @@
 В dev: цветной ConsoleRenderer, ПД видны полностью.
 """
 
+import contextvars
 import functools
 import os
 import time
@@ -20,6 +21,11 @@ from typing import Any, AsyncIterator
 
 import structlog
 from structlog.contextvars import bind_contextvars, clear_contextvars  # noqa: F401
+
+# Время старта текущего запроса (графа) — для замера полного цикла
+_graph_start_time: contextvars.ContextVar[float] = contextvars.ContextVar(
+    "_graph_start_time",
+)
 
 # Ключи, содержащие персональные данные — маскируются в prod
 SENSITIVE_KEYS = {"phone", "access_token", "session_id", "email"}
@@ -45,8 +51,9 @@ def _noop(
 
 def setup_logging() -> None:
     """Настройка structlog. Вызывается один раз при старте сервиса."""
+    log_format = os.getenv("LOG_FORMAT", "").strip().lower()
     env = os.getenv("ENV", "prod").strip().lower()
-    is_dev = env == "dev"
+    is_dev = env == "dev" and log_format != "json"
 
     processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
@@ -111,3 +118,20 @@ async def timed_block(operation: str) -> AsyncIterator[None]:
     finally:
         duration = round(time.perf_counter() - t0, 3)
         log.info("operation.completed", operation=operation, duration_sec=duration)
+
+
+def mark_graph_start() -> None:
+    """Запоминает время старта графа в contextvars."""
+    _graph_start_time.set(time.perf_counter())
+
+
+def log_graph_total() -> None:
+    """Логирует полное время выполнения графа."""
+    t0 = _graph_start_time.get(None)
+    if t0 is not None:
+        duration = round(time.perf_counter() - t0, 3)
+        get_logger().info(
+            "operation.completed",
+            operation="graph.total",
+            duration_sec=duration,
+        )

@@ -13,7 +13,7 @@ from langgraph.runtime import Runtime
 
 from .zena_common import _content_to_text
 from .zena_httpservice import sent_message_to_history
-from .zena_logging import get_logger
+from .zena_logging import get_logger, log_graph_total
 from .zena_state import RESET, Context, State
 
 logger = get_logger()
@@ -93,6 +93,7 @@ class ResetData(AgentMiddleware):
     ) -> dict[str, Any] | None:
         """Возвращает RESET для списковых полей и нули для токенов."""
         logger.info("middleware.started", middleware="ResetData")
+        log_graph_total()
 
         return {
             "tools_args": RESET,

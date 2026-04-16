@@ -22,7 +22,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.runtime import Runtime
 
 from .zena_common import _content_to_text
-from .zena_logging import bind_contextvars, clear_contextvars, get_logger
+from .zena_logging import bind_contextvars, clear_contextvars, get_logger, mark_graph_start
 from .zena_postgres import (
     data_collection_postgres,
     data_user_info,
@@ -71,6 +71,7 @@ class VerifyInputMessage(AgentMiddleware):
             # Привязываем user_cc ко всем логам этого запроса
             clear_contextvars()
             bind_contextvars(user_cc=user_companychat)
+            mark_graph_start()
 
             logger.info("middleware.started", middleware="VerifyInputMessage")
 
