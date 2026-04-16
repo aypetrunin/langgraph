@@ -69,8 +69,9 @@ class VerifyInputMessage(AgentMiddleware):
             user_companychat = ctx.get("_user_companychat")
 
             # Привязываем user_cc ко всем логам этого запроса
+            request_id = ctx.get("_request_id", "")
             clear_contextvars()
-            bind_contextvars(user_cc=user_companychat)
+            bind_contextvars(user_cc=user_companychat, request_id=request_id)
             mark_graph_start()
 
             logger.info("middleware.started", middleware="VerifyInputMessage")
