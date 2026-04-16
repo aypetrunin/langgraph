@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import time
+
+import structlog.contextvars
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Type
 
@@ -635,6 +637,13 @@ class ToolMonitoringMiddleware(AgentMiddleware):
         """Перехватывает вызов инструмента, нормализует результат и применяет постпроцессор."""
         tool_name = request.tool_call.get("name")
         tool_args = request.tool_call.get("args")
+
+        # Сквозная трассировка: инжектим request_id в аргументы инструмента
+        request_id = structlog.contextvars.get_contextvars().get("request_id", "")
+        if tool_args is None:
+            tool_args = {}
+            request.tool_call["args"] = tool_args
+        tool_args["_request_id"] = request_id
 
         logger.info("tool.started", tool=tool_name)
         logger.debug("tool.args", tool=tool_name, args=tool_args)
