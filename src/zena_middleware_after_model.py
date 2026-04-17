@@ -53,19 +53,19 @@ class GetCRMGOOnboardStage(AgentMiddleware):
         if tool_calls:
             return None
 
-        onboarding = data.get("onboarding", {}).get("onboarding_status")
+        onboarding_info = data.get("onboarding") or {}
+        onboarding_status = onboarding_info.get("onboarding_status")
 
-        if onboarding is None or onboarding:
+        if onboarding_status is None or onboarding_status:
             return None
 
-        onboarding_stage = data.get("onboarding").get("onboarding_stage", 0)
-        if onboarding_stage < 6:
-            data["onboarding"]["onboarding_stage"] += 1
- 
+        onboarding_stage = onboarding_info.get("onboarding_stage", 0)
+        new_stage = onboarding_stage + 1 if onboarding_stage < 6 else onboarding_stage
 
-        return {
-            "data": data
-        }
+        new_onboarding = {**onboarding_info, "onboarding_stage": new_stage}
+        new_data = {**data, "onboarding": new_onboarding}
+
+        return {"data": new_data}
 
 
 class GetToolArgs(AgentMiddleware):
