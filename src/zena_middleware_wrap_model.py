@@ -25,7 +25,7 @@ from langchain_core.tools.structured import StructuredTool
 
 from .zena_common import model_4o, model_4o_mini
 from .zena_google_doc import GoogleDocTemplateReader
-from .zena_logging import get_logger, timed_block
+from .zena_logging import bind_request_ctx, get_logger, timed_block
 
 logger = get_logger()
 
@@ -41,6 +41,7 @@ class DynamicSystemPrompt(AgentMiddleware):
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse:
         """Рендерит системный промпт и передаёт обновлённый запрос обработчику."""
+        bind_request_ctx(getattr(request, "runtime", None))
         logger.info("middleware.started", middleware="DynamicSystemPrompt")
 
         # Берём data из state, но делаем копию, чтобы избежать неожиданных сайд-эффектов
@@ -426,6 +427,7 @@ class ToolSelectorMiddleware(AgentMiddleware):
     # =========================================================================
     async def awrap_model_call(self, request, handler):
         """Фильтрует инструменты и выбирает модель перед передачей запроса обработчику."""
+        bind_request_ctx(getattr(request, "runtime", None))
         logger.info("middleware.started", middleware="ToolSelectorMiddleware")
 
         request.tools = await self._select_relevant_tools(request.state, request.tools)

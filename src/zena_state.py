@@ -43,7 +43,7 @@ def add_tools_or_reset(current: list[Any] | None, update: Any) -> list[Any]:
     return current + update
 
 
-class Context(TypedDict):
+class Context(TypedDict, total=False):
     """Переменные контекста выполнения."""
     _user_companychat: int
     _reply_to_history_id: int
@@ -51,6 +51,7 @@ class Context(TypedDict):
     _user_id: int
     _studio: bool
     _prompt_google_url: str
+    _request_id: str
 
 
 class InputState(TypedDict, total=True):

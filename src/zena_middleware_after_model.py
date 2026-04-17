@@ -14,7 +14,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage
 from langgraph.runtime import Runtime
 
-from .zena_logging import get_logger
+from .zena_logging import bind_request_ctx, get_logger
 from .zena_state import Context, State
 
 logger = get_logger()
@@ -29,6 +29,7 @@ class GetCRMGOOnboardStage(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Инкрементирует onboarding_stage после ответа модели."""
+        bind_request_ctx(runtime)
         logger.info("middleware.started", middleware="GetCRMGOOnboardStage")
 
         data = state.get("data", {})
@@ -76,6 +77,7 @@ class GetToolArgs(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Извлекает аргументы вызовов инструментов из последнего AIMessage."""
+        bind_request_ctx(runtime)
         logger.info("middleware.started", middleware="GetToolArgs")
 
         messages: list[AnyMessage] | None = state.get("messages")
@@ -111,6 +113,7 @@ class GetCountToken(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Подсчитывает токены из usage_metadata и накапливает их в state."""
+        bind_request_ctx(runtime)
         logger.info("middleware.started", middleware="GetCountToken")
 
         messages: list[BaseMessage] | None = cast(

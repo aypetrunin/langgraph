@@ -15,7 +15,7 @@ from langchain.messages import RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 
-from .zena_logging import get_logger
+from .zena_logging import bind_request_ctx, get_logger
 from .zena_state import Context, State
 
 logger = get_logger()
@@ -30,6 +30,7 @@ class TrimMessages(AgentMiddleware):
             runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Ограничение количества сообщений для модели."""
+        bind_request_ctx(runtime)
         logger.info("middleware.started", middleware="TrimMessages")
 
         MAX_COUNT_MESSAGES = int(os.getenv("MAX_MESSAGES_HISTORY", "20"))

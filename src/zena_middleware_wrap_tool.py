@@ -25,7 +25,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
 from .zena_common import _content_to_text
-from .zena_logging import get_logger
+from .zena_logging import bind_request_ctx, get_logger
 
 logger = get_logger()
 
@@ -635,6 +635,7 @@ class ToolMonitoringMiddleware(AgentMiddleware):
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
         """Перехватывает вызов инструмента, нормализует результат и применяет постпроцессор."""
+        bind_request_ctx(getattr(request, "runtime", None))
         tool_name = request.tool_call.get("name")
         tool_args = request.tool_call.get("args")
 

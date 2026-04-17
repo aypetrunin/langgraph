@@ -13,7 +13,7 @@ from langgraph.runtime import Runtime
 
 from .zena_common import _content_to_text
 from .zena_httpservice import sent_message_to_history
-from .zena_logging import get_logger, log_graph_total
+from .zena_logging import bind_request_ctx, get_logger, log_graph_total
 from .zena_state import RESET, Context, State
 
 logger = get_logger()
@@ -28,6 +28,7 @@ class SaveResponseAgent(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Отправляет текст ответа, использованные инструменты и токены в httpservice."""
+        bind_request_ctx(runtime)
         logger.info("middleware.started", middleware="SaveResponseAgent")
 
         try:
@@ -92,6 +93,7 @@ class ResetData(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Возвращает RESET для списковых полей и нули для токенов."""
+        bind_request_ctx(runtime)
         logger.info("middleware.started", middleware="ResetData")
         log_graph_total()
 

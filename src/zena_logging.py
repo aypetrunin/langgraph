@@ -6,6 +6,10 @@
 - timed(operation) — декоратор для профилирования async-функций.
 - timed_block(operation) — контекстный менеджер для профилирования блоков кода.
 - bind_contextvars / clear_contextvars — привязка user_cc к контексту запроса.
+- bind_request_ctx(runtime) — повторно биндит request_id/user_cc из runtime.context
+  (нужно в каждой middleware, т.к. LangGraph runner исполняет middleware в
+  отдельных async-task scope, и contextvars привязанные в одной не доступны
+  в следующей).
 
 Переключение dev/prod по переменной окружения ENV (по умолчанию "prod").
 В prod: JSON-формат, маскирование ПД (phone, access_token, session_id, email).
@@ -57,6 +61,28 @@ def _request_id_first(
     if rid is not None:
         event_dict = {"request_id": rid, **event_dict}
     return event_dict
+
+
+def bind_request_ctx(runtime: Any) -> None:
+    """Повторно биндит request_id/user_cc из runtime.context.
+
+    LangGraph pregel-runner запускает каждую middleware в собственном scope
+    contextvars, поэтому значения привязанные в одной middleware не видны
+    в следующей — подменяются на aegra/langgraph-api серверным request_id.
+
+    Вызывается первой строкой в каждой middleware-функции, которая логирует.
+    Идемпотентна: если runtime.context пустой, ничего не меняет.
+    """
+    ctx = getattr(runtime, "context", None) or {}
+    rid = ctx.get("_request_id")
+    ucc = ctx.get("_user_companychat")
+    kw: dict[str, Any] = {}
+    if rid is not None:
+        kw["request_id"] = rid
+    if ucc is not None:
+        kw["user_cc"] = ucc
+    if kw:
+        bind_contextvars(**kw)
 
 
 def setup_logging() -> None:

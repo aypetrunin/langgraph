@@ -23,7 +23,13 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.runtime import Runtime
 
 from .zena_common import _content_to_text
-from .zena_logging import bind_contextvars, clear_contextvars, get_logger, mark_graph_start
+from .zena_logging import (
+    bind_contextvars,
+    bind_request_ctx,
+    clear_contextvars,
+    get_logger,
+    mark_graph_start,
+)
 from .zena_postgres import (
     data_collection_postgres,
     data_user_info,
@@ -151,6 +157,7 @@ class GetDatabaseMiddleware(AgentMiddleware):
     ) -> dict[str, Any] | None:
         """Загружает данные из PostgreSQL и внешних API перед запуском агента."""
         try:
+            bind_request_ctx(runtime)
             logger.info("middleware.started", middleware="GetDatabase")
 
             ctx = runtime.context or {}
@@ -223,6 +230,7 @@ class GetKeyWordMiddleware(AgentMiddleware):
         runtime: Runtime[Context],
     ) -> dict[str, Any] | None:
         """Ищет услуги по ключевым словам из промо-таблицы."""
+        bind_request_ctx(runtime)
         logger.info("middleware.started", middleware="GetKeyWord")
         try:
             channel_id = state["data"]["channel_id"]
@@ -272,6 +280,7 @@ class GetCRMGOMiddleware(AgentMiddleware):
     ) -> dict[str, Any] | None:
         """Читает данные onboarding из GO CRM."""
         try:
+            bind_request_ctx(runtime)
             logger.info("middleware.started", middleware="GetCRMGO")
 
             data = state.get("data", {})
