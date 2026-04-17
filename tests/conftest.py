@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
@@ -10,7 +11,7 @@ from langchain_core.messages import HumanMessage
 
 
 @pytest.fixture
-def agent_state_factory():
+def agent_state_factory() -> Callable[..., dict[str, Any]]:
     """Factory for State dicts used in middleware tests.
 
     Returns a callable that produces a minimal dict matching the keys
@@ -21,7 +22,7 @@ def agent_state_factory():
         *,
         messages: list[Any] | None = None,
         data: dict[str, Any] | None = None,
-        tokens: dict[str, int] | None = None,
+        tokens: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "messages": messages or [HumanMessage(content="test")],
@@ -33,7 +34,7 @@ def agent_state_factory():
 
 
 @pytest.fixture
-def runtime_factory():
+def runtime_factory() -> Callable[..., SimpleNamespace]:
     """Factory for a fake Runtime[Context].
 
     Middleware only read `runtime.context` (a dict) and occasionally
