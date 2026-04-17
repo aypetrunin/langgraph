@@ -30,4 +30,17 @@ class Settings(BaseSettings):
     mcp_port_egoistka: int
 
 
-settings = Settings()
+_settings: Settings | None = None
+
+
+def get_settings() -> Settings:
+    """Return the validated Settings singleton, constructing it on first call.
+
+    Import of this module is side-effect-free; validation happens on first
+    call to get_settings(), which in the normal service lifecycle is at
+    startup (inside zena_create_graph).
+    """
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
