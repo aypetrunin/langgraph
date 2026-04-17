@@ -13,12 +13,12 @@
 """
 
 import asyncio
-import os
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from .zena_create_agent import create_agent_mcp
+from .zena_settings import get_settings
 from .zena_state import Context, InputState, OutputState, State
 
 
@@ -39,18 +39,6 @@ async def create_agent_graph(port: int) -> CompiledStateGraph:
     return workflow.compile()
 
 
-# -------------------- MCP-порты для каждой компании --------------------
-# Значения берутся из deploy/dev.env или deploy/prod.env.
-# dev-порты: 5xxx, prod-порты: 15xxx.
-MCP_PORT_SOFIA = os.getenv("MCP_PORT_SOFIA")          # 5002 / 15002
-MCP_PORT_ANISA = os.getenv("MCP_PORT_ANISA")           # 5005 / 15005
-MCP_PORT_ANNITTA = os.getenv("MCP_PORT_ANNITTA")       # 5006 / 15006
-MCP_PORT_ANASTASIA = os.getenv("MCP_PORT_ANASTASIA")   # 5007 / 15007
-MCP_PORT_ALENA = os.getenv("MCP_PORT_ALENA")           # 5020 / 15020
-MCP_PORT_VALENTINA = os.getenv("MCP_PORT_VALENTINA")   # 5021 / 15021
-MCP_PORT_MARINA = os.getenv("MCP_PORT_MARINA")         # 5024 / 15024
-MCP_PORT_EGOISTKA = os.getenv("MCP_PORT_EGOISTKA")     # 5017 / 15017
-
 
 async def _create_all_graphs() -> tuple[
     CompiledStateGraph,
@@ -63,15 +51,16 @@ async def _create_all_graphs() -> tuple[
     CompiledStateGraph,
 ]:
     """Create all agent graphs in parallel."""
+    settings = get_settings()
     return await asyncio.gather(
-        create_agent_graph(MCP_PORT_SOFIA),
-        create_agent_graph(MCP_PORT_ANISA),
-        create_agent_graph(MCP_PORT_ANNITTA),
-        create_agent_graph(MCP_PORT_ANASTASIA),
-        create_agent_graph(MCP_PORT_ALENA),
-        create_agent_graph(MCP_PORT_VALENTINA),
-        create_agent_graph(MCP_PORT_MARINA),
-        create_agent_graph(MCP_PORT_EGOISTKA),
+        create_agent_graph(settings.mcp_port_sofia),
+        create_agent_graph(settings.mcp_port_anisa),
+        create_agent_graph(settings.mcp_port_annitta),
+        create_agent_graph(settings.mcp_port_anastasia),
+        create_agent_graph(settings.mcp_port_alena),
+        create_agent_graph(settings.mcp_port_valentina),
+        create_agent_graph(settings.mcp_port_marina),
+        create_agent_graph(settings.mcp_port_egoistka),
     )
 
 

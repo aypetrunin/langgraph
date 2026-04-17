@@ -58,3 +58,21 @@ def test_settings_fails_fast_when_var_not_int(monkeypatch):
 
     with pytest.raises(ValidationError):
         Settings()
+
+
+def test_create_graph_module_exposes_all_ports(monkeypatch):
+    """zena_create_graph will consume get_settings() — verify all 8 attrs are int."""
+    for k, v in _env_for_all_ports().items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("IS_DOCKER", "1")
+
+    from src.zena_settings import get_settings
+
+    s = get_settings()
+    expected_attrs = [
+        "mcp_port_sofia", "mcp_port_anisa", "mcp_port_annitta",
+        "mcp_port_anastasia", "mcp_port_alena", "mcp_port_valentina",
+        "mcp_port_marina", "mcp_port_egoistka",
+    ]
+    for attr in expected_attrs:
+        assert isinstance(getattr(s, attr), int)
