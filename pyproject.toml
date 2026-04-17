@@ -19,6 +19,7 @@ dependencies = [
     "fastmcp>=2.10.4",
     "grpcio>=1.73.1",
     "pydantic>=2.11.7",
+    "pydantic-settings>=2.5.0",
     "qdrant-client>=1.14.3",
     "openai>=1.95.1",
     "uvicorn>=0.35.0",
@@ -103,3 +104,9 @@ disallow_untyped_defs = true # Требовать аннотаций типов 
 init_forbid_extra = true # Запретить передачу в конструктор моделей Pydantic полей, не описанных явно в модели
 init_typed = true # Генерировать типизированные сигнатуры __init__ на основе типов атрибутов модели (типизация конструктора)
 warn_required_dynamic_aliases = true # Предупреждать, если используются алиасы или динамические имена полей без явной типизации
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
