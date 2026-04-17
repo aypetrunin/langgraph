@@ -249,15 +249,13 @@ class GetKeyWordMiddleware(AgentMiddleware):
             if not promo:
                 return None
             
-            data = state.get('data')
-            data['items_search'] = promo
-            data['dialog_state'] = 'promo'
+            data = {**(state.get("data") or {})}
+            data["items_search"] = promo
+            data["dialog_state"] = "promo"
 
             logger.debug("state.data", data=data)
 
-            return {
-                **data
-            }
+            return {"data": data}
 
         except Exception:
             logger.exception("middleware.error", middleware="GetKeyWord")
