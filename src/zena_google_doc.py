@@ -222,16 +222,20 @@ class GoogleDocTemplateReader:
         if not self.service_account_file:
             self.service_account_file = get_service_account_file()
 
-        # Клиент для token refresh — прямое соединение к oauth2.googleapis.com
-        if self._token_client is None or self._token_client.is_closed:
-            self._token_client = httpx.AsyncClient(timeout=HTTP_TIMEOUT)
-
-        # Клиент для Drive API — через прокси если задан GOOGLE_PROXY_URL.
+        # Оба клиента уважают GOOGLE_PROXY_URL, если задан:
+        # - token_client → oauth2.googleapis.com
+        # - drive_client → www.googleapis.com
         # На проде переменная не задана → proxy=None → прямое соединение.
-        # В WSL dev → прокси нужен, т.к. www.googleapis.com (192.178.x.x)
-        # маршрутизируется локально.
+        # В dev (WSL, docker) → нужен прокси для обоих endpoint'ов.
+        proxy_url = os.getenv("GOOGLE_PROXY_URL")
+
+        if self._token_client is None or self._token_client.is_closed:
+            self._token_client = httpx.AsyncClient(
+                timeout=HTTP_TIMEOUT,
+                proxy=proxy_url,
+            )
+
         if self._drive_client is None or self._drive_client.is_closed:
-            proxy_url = os.getenv("GOOGLE_PROXY_URL")
             self._drive_client = httpx.AsyncClient(
                 timeout=HTTP_TIMEOUT,
                 proxy=proxy_url,
