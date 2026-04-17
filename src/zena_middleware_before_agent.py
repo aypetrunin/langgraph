@@ -12,6 +12,7 @@ GetCRMGOMiddleware — загружает данные онбординга из
 
 from __future__ import annotations
 
+import time
 from typing import Any, Union
 
 from langchain.agents.middleware import (
@@ -69,7 +70,7 @@ class VerifyInputMessage(AgentMiddleware):
             user_companychat = ctx.get("_user_companychat")
 
             # Привязываем user_cc ко всем логам этого запроса
-            request_id = ctx.get("_request_id", "")
+            request_id = ctx.get("_request_id") or f"{user_companychat}:{int(time.time())}"
             clear_contextvars()
             bind_contextvars(user_cc=user_companychat, request_id=request_id)
             mark_graph_start()
