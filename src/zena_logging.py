@@ -49,6 +49,16 @@ def _noop(
     return event_dict
 
 
+def _request_id_first(
+    logger: Any, method: str, event_dict: dict[str, Any],
+) -> dict[str, Any]:
+    """Ставит request_id первым полем в event_dict."""
+    rid = event_dict.pop("request_id", None)
+    if rid is not None:
+        event_dict = {"request_id": rid, **event_dict}
+    return event_dict
+
+
 def setup_logging() -> None:
     """Настройка structlog. Вызывается один раз при старте сервиса."""
     log_format = os.getenv("LOG_FORMAT", "").strip().lower()
@@ -59,6 +69,7 @@ def setup_logging() -> None:
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
+        _request_id_first,
         _noop if is_dev else _mask_pii_processor,
         structlog.dev.ConsoleRenderer() if is_dev
         else structlog.processors.JSONRenderer(),
